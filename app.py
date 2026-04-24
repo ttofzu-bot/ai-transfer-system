@@ -42,7 +42,7 @@ h1, h2, h3, h4, h5, h6, p, span, div {
 .block-container { max-width: 1080px; padding: 2.5rem 1.5rem 4rem; }
 
 /* === HIDE STREAMLIT BRANDING === */
-#MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+#MainMenu, footer { visibility: hidden; }
 
 /* === SIDEBAR === */
 [data-testid="stSidebar"] {
