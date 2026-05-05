@@ -277,29 +277,45 @@ with st.sidebar:
 # CORE: GEMINI WITH RETRY
 # ---------------------------------------------------------------------------
 def call_gemini(api_key: str, prompt: str, system_instruction: str = "", max_retries: int = 5) -> str:
-    """Call Gemini 2.5 Flash with exponential backoff retry on 429/503."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    if system_instruction:
-        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
-    payload["generationConfig"] = {"temperature": 0.2, "maxOutputTokens": 8192}
+    """Call Gemini with multi-model fallback: 2.5 Flash → 2.5 Flash-Lite → 1.5 Flash."""
+    models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
 
-    for attempt in range(max_retries):
-        resp = requests.post(url, json=payload, timeout=120)
-        if resp.status_code == 200:
-            data = resp.json()
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        if system_instruction:
+            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+        payload["generationConfig"] = {"temperature": 0.2, "maxOutputTokens": 8192}
+
+        for attempt in range(max_retries):
             try:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            except (KeyError, IndexError):
-                raise Exception(f"Unexpected response: {json.dumps(data)[:500]}")
-        elif resp.status_code in (429, 503):
-            wait = (2 ** attempt) + random.uniform(0.5, 1.5)
-            st.toast(f"⏳ Gemini přetížen, čekám {wait:.0f}s... (pokus {attempt+1}/{max_retries})")
-            time.sleep(wait)
-        else:
-            raise Exception(f"Gemini error {resp.status_code}: {resp.text[:500]}")
+                resp = requests.post(url, json=payload, timeout=120)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    try:
+                        return data["candidates"][0]["content"]["parts"][0]["text"]
+                    except (KeyError, IndexError):
+                        raise Exception(f"Unexpected response: {json.dumps(data)[:500]}")
+                elif resp.status_code in (429, 503):
+                    wait = (2 ** attempt) * 2 + random.uniform(1, 3)
+                    if attempt < max_retries - 1:
+                        st.toast(f"⏳ {model} přetížen, čekám {wait:.0f}s... (pokus {attempt+1}/{max_retries})")
+                        time.sleep(wait)
+                    else:
+                        break  # Try next model
+                else:
+                    raise Exception(f"Gemini error {resp.status_code}: {resp.text[:500]}")
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    st.toast(f"⏳ {model} timeout, zkouším znovu...")
+                    time.sleep(3)
+                else:
+                    break
 
-    raise Exception(f"Gemini nedostupný po {max_retries} pokusech. Zkus to znovu za chvíli.")
+        st.toast(f"⚠️ {model} nedostupný, zkouším další model...")
+        time.sleep(2)
+
+    raise Exception("Všechny Gemini modely jsou přetížené. Zkus to za pár minut.")
 
 # ---------------------------------------------------------------------------
 # PDF
