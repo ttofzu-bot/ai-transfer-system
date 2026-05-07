@@ -1,10 +1,8 @@
 """
-AI Transfer System V4.0 — FZÚ Patent & Research Intelligence
+AI Transfer System V5.0 — FZÚ Patent & Research Intelligence
 =============================================================
-Pipeline: PDF → Gemini multi-query → Google Patents → AI filtr → OpenAlex → Kritická analýza → Docs
-Features: retry logic, historie analýz, všechny patenty viditelné, deployment-ready
-
-Spuštění:  pip install streamlit requests PyPDF2 python-docx  &&  streamlit run app.py
+New: patent statistics, XLSX table export, fixed DOCX (no **), transparent relevance, country extraction
+Pipeline: PDF → Gemini → Google Patents → AI filtr → OpenAlex → Stats → Analýza → Docs + Excel
 """
 
 import streamlit as st
@@ -15,223 +13,55 @@ import os
 import io
 import re
 import random
-import hashlib
 from datetime import datetime
 from pathlib import Path
+from collections import Counter
 
-# ---------------------------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------------------------
 st.set_page_config(page_title="AI Transfer System — FZÚ", page_icon="🔬", layout="wide", initial_sidebar_state="expanded")
 HISTORY_DIR = Path("analysis_history")
 HISTORY_DIR.mkdir(exist_ok=True)
 
 # ---------------------------------------------------------------------------
-# CSS
+# CSS (same as V4 with fixes)
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-/* === GLOBAL RESET === */
-html, body, [class*="st-"], .stMarkdown, .stTextInput label, .stSlider label,
-.stFileUploader label, .stButton button, .stTabs [data-baseweb="tab"],
-h1, h2, h3, h4, h5, h6, p, span, div {
-    font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
-}
-.block-container { max-width: 1080px; padding: 2.5rem 1.5rem 4rem; }
-
-/* === HIDE STREAMLIT BRANDING === */
+html, body, [class*="st-"] { font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif !important; }
+.block-container { max-width: 1100px; padding: 2.5rem 1.5rem 4rem; }
 #MainMenu, footer { visibility: hidden; }
-
-/* === SIDEBAR === */
-[data-testid="stSidebar"] {
-    background: #f7f9fc !important;
-    border-right: 1px solid #e8ecf1 !important;
-}
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3, [data-testid="stSidebar"] .stMarkdown h3 {
-    color: #0f172a !important; font-size: 0.8rem !important; text-transform: uppercase;
-    letter-spacing: 0.08em !important; font-weight: 600 !important; margin-top: 1rem !important;
-}
-[data-testid="stSidebar"] .stTextInput input {
-    background: #ffffff !important; border: 1px solid #d1d9e6 !important;
-    color: #1e293b !important; border-radius: 8px !important; font-size: 13px !important;
-}
-[data-testid="stSidebar"] .stTextInput input:focus {
-    border-color: #0ea5e9 !important; box-shadow: 0 0 0 2px rgba(14,165,233,0.1) !important;
-}
-[data-testid="stSidebar"] button {
-    background: #ffffff !important; border: 1px solid #d1d9e6 !important;
-    color: #1e293b !important; border-radius: 8px !important; width: 100%;
-    transition: all 0.15s !important; font-weight: 500 !important;
-}
-[data-testid="stSidebar"] button:hover {
-    background: #f0f9ff !important; border-color: #0ea5e9 !important; color: #0369a1 !important;
-}
-[data-testid="stSidebar"] hr { border-color: #e8ecf1 !important; }
-
-/* === HERO BANNER === */
-.hero {
-    background: linear-gradient(135deg, #0b1120 0%, #162240 40%, #1e3a5f 70%, #0b1120 100%);
-    color: white; padding: 3rem 3rem 2.5rem; border-radius: 20px; margin-bottom: 2rem;
-    position: relative; overflow: hidden;
-    border: 1px solid rgba(56,189,248,0.1);
-}
-.hero::before {
-    content: ''; position: absolute; top: -80px; right: -60px; width: 400px; height: 400px;
-    background: radial-gradient(circle, rgba(56,189,248,0.06) 0%, transparent 70%);
-    pointer-events: none;
-}
-.hero::after {
-    content: ''; position: absolute; bottom: -100px; left: -40px; width: 300px; height: 300px;
-    background: radial-gradient(circle, rgba(16,185,129,0.04) 0%, transparent 70%);
-    pointer-events: none;
-}
-.hero-badge {
-    display: inline-block; background: rgba(56,189,248,0.12); color: #7dd3fc;
-    padding: 4px 14px; border-radius: 20px; font-size: 0.7rem; font-weight: 600;
-    letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1rem;
-    border: 1px solid rgba(56,189,248,0.15);
-}
-.hero h1 {
-    font-size: 2rem; font-weight: 700; margin: 0 0 0.6rem;
-    letter-spacing: -0.03em; line-height: 1.2;
-    background: linear-gradient(135deg, #ffffff 0%, #94cef5 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-}
-.hero p { font-size: 0.92rem; opacity: 0.55; margin: 0; font-weight: 400; line-height: 1.5; }
-.hero-org { font-size: 0.75rem; opacity: 0.35; margin-top: 1rem; font-weight: 500; letter-spacing: 0.04em; }
-
-/* === PHASE BAR === */
+[data-testid="stSidebar"] { background: #f7f9fc !important; border-right: 1px solid #e8ecf1 !important; }
+[data-testid="stSidebar"] h3 { color: #0f172a !important; font-size: 0.8rem !important; text-transform: uppercase; letter-spacing: 0.08em !important; font-weight: 600 !important; }
+[data-testid="stSidebar"] .stTextInput input { background: #fff !important; border: 1px solid #d1d9e6 !important; border-radius: 8px !important; }
+[data-testid="stSidebar"] button { background: #fff !important; border: 1px solid #d1d9e6 !important; border-radius: 8px !important; width: 100%; font-weight: 500 !important; }
+[data-testid="stSidebar"] button:hover { background: #f0f9ff !important; border-color: #0ea5e9 !important; }
+.hero { background: linear-gradient(135deg, #0b1120 0%, #162240 40%, #1e3a5f 70%, #0b1120 100%); color: white; padding: 3rem 3rem 2.5rem; border-radius: 20px; margin-bottom: 2rem; position: relative; overflow: hidden; border: 1px solid rgba(56,189,248,0.1); }
+.hero-badge { display: inline-block; background: rgba(56,189,248,0.12); color: #7dd3fc; padding: 4px 14px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1rem; border: 1px solid rgba(56,189,248,0.15); }
+.hero h1 { font-size: 2rem; font-weight: 700; margin: 0 0 0.6rem; letter-spacing: -0.03em; background: linear-gradient(135deg, #fff 0%, #94cef5 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.hero p { font-size: 0.92rem; opacity: 0.55; margin: 0; }
+.hero-org { font-size: 0.75rem; opacity: 0.35; margin-top: 1rem; font-weight: 500; }
 .phase-bar { display: flex; gap: 4px; margin: 1.5rem 0; flex-wrap: wrap; }
-.phase-pill {
-    padding: 7px 16px; border-radius: 8px; font-size: 0.72rem; font-weight: 600;
-    letter-spacing: 0.02em; transition: all 0.2s; border: 1px solid transparent;
-}
+.phase-pill { padding: 7px 16px; border-radius: 8px; font-size: 0.72rem; font-weight: 600; border: 1px solid transparent; }
 .phase-active { background: #0c4a6e; color: #7dd3fc; border-color: rgba(56,189,248,0.3); }
 .phase-done { background: #064e3b; color: #6ee7b7; border-color: rgba(16,185,129,0.3); }
 .phase-pending { background: #f1f5f9; color: #94a3b8; }
-
-/* === STAT BOXES === */
 .stat-row { display: flex; gap: 14px; margin: 1.5rem 0; }
-.stat-box {
-    flex: 1; background: #ffffff; border: 1px solid #e8ecf1;
-    border-radius: 14px; padding: 1.25rem 1rem; text-align: center;
-    transition: all 0.15s; position: relative; overflow: hidden;
-}
-.stat-box::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-    background: linear-gradient(90deg, #0ea5e9, #10b981); opacity: 0;
-    transition: opacity 0.15s;
-}
-.stat-box:hover::before { opacity: 1; }
-.stat-box:hover { border-color: #cbd5e1; }
-.stat-box .num { font-size: 1.6rem; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+.stat-box { flex: 1; background: #fff; border: 1px solid #e8ecf1; border-radius: 14px; padding: 1.25rem 1rem; text-align: center; }
+.stat-box .num { font-size: 1.6rem; font-weight: 700; color: #0f172a; }
 .stat-box .label { font-size: 0.7rem; color: #64748b; margin-top: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
-
-/* === PATENT CARDS === */
-.patent-card {
-    border: 1px solid #eaeff5; border-radius: 14px; padding: 1.25rem 1.5rem;
-    margin-bottom: 10px; background: #ffffff; transition: all 0.15s;
-    position: relative;
-}
-.patent-card:hover { border-color: #93c5fd; box-shadow: 0 2px 12px rgba(14,165,233,0.06); transform: translateY(-1px); }
-.patent-card h4 { font-size: 0.9rem; font-weight: 600; margin: 0 0 0.4rem; color: #0f172a; line-height: 1.4; }
+.patent-card { border: 1px solid #eaeff5; border-radius: 14px; padding: 1.25rem 1.5rem; margin-bottom: 10px; background: #fff; }
+.patent-card:hover { border-color: #93c5fd; }
+.patent-card h4 { font-size: 0.9rem; font-weight: 600; margin: 0 0 0.4rem; color: #0f172a; }
 .patent-card .meta { font-size: 0.78rem; color: #64748b; line-height: 1.7; }
-.patent-card .applicant {
-    display: inline-block; background: #eff6ff; color: #1d4ed8;
-    padding: 3px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 600;
-    margin-top: 0.5rem; margin-right: 4px; letter-spacing: 0.01em;
-}
-.relevance {
-    display: inline-block; padding: 3px 10px; border-radius: 6px;
-    font-size: 0.7rem; font-weight: 600; margin-top: 0.5rem;
-}
+.patent-card .applicant { display: inline-block; background: #eff6ff; color: #1d4ed8; padding: 3px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 600; margin-top: 0.5rem; margin-right: 4px; }
+.relevance { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 600; margin-top: 0.5rem; }
 .rel-high { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
 .rel-med { background: #fefce8; color: #854d0e; border: 1px solid #fde68a; }
 .rel-low { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-
-/* === ANALYSIS BOX === */
-.analysis-box {
-    background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #0ea5e9;
-    border-radius: 0 14px 14px 0; padding: 2rem; margin: 1rem 0;
-    font-size: 0.88rem; line-height: 1.8; color: #1e293b;
-}
-
-/* === HISTORY === */
-.history-card { border: 1px solid #eaeff5; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 8px; background: #ffffff; }
-.history-card:hover { border-color: #93c5fd; }
-
-/* === BUTTONS === */
-.stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #0369a1 0%, #0ea5e9 100%) !important;
-    color: white !important; border: none !important; border-radius: 10px !important;
-    font-weight: 600 !important; letter-spacing: 0.01em !important;
-    padding: 0.6rem 1.5rem !important; transition: all 0.15s !important;
-    box-shadow: 0 2px 8px rgba(14,165,233,0.2) !important;
-}
-.stButton > button[kind="primary"]:hover {
-    box-shadow: 0 4px 16px rgba(14,165,233,0.3) !important;
-    transform: translateY(-1px) !important;
-}
-.stButton > button:not([kind="primary"]) {
-    border-radius: 10px !important; border: 1px solid #e2e8f0 !important;
-    font-weight: 500 !important; transition: all 0.15s !important;
-}
-
-/* === TABS === */
-.stTabs [data-baseweb="tab-list"] { gap: 0; border-bottom: 2px solid #f1f5f9; }
-.stTabs [data-baseweb="tab"] {
-    font-weight: 500 !important; font-size: 0.82rem !important;
-    padding: 10px 20px !important; border-radius: 8px 8px 0 0 !important;
-}
-.stTabs [aria-selected="true"] {
-    background: #f0f9ff !important; color: #0369a1 !important;
-    border-bottom: 2px solid #0ea5e9 !important;
-}
-
-/* === SLIDERS === */
-[data-testid="stSlider"] [role="slider"] { background: #0ea5e9 !important; }
-[data-testid="stSlider"] [data-testid="stTickBarMin"], [data-testid="stSlider"] [data-testid="stTickBarMax"] { background: #e2e8f0 !important; }
-
-/* === FILE UPLOADER === */
-[data-testid="stFileUploader"] {
-    border: 2px dashed #d1d9e6 !important; border-radius: 14px !important;
-    background: #f8fafc !important; transition: all 0.15s;
-}
-[data-testid="stFileUploader"]:hover { border-color: #93c5fd !important; background: #f0f9ff !important; }
-[data-testid="stFileUploader"] button { display: none !important; }
-[data-testid="stFileUploader"] section { padding: 2rem 1rem !important; }
-[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInput"] + div small { font-size: 0 !important; }
-[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInput"] + div small::after {
-    content: 'Přetáhni PDF sem nebo klikni pro výběr'; font-size: 0.85rem; color: #64748b;
-}
-
-/* === TEXT INPUT === */
-.stTextInput input {
-    border-radius: 10px !important; border: 1px solid #e2e8f0 !important;
-    font-size: 0.88rem !important; padding: 0.6rem 0.9rem !important;
-}
-.stTextInput input:focus { border-color: #0ea5e9 !important; box-shadow: 0 0 0 2px rgba(14,165,233,0.1) !important; }
-
-/* === EXPANDER === */
-.streamlit-expanderHeader { font-weight: 500 !important; font-size: 0.88rem !important; border-radius: 10px !important; }
-
-/* === PROGRESS === */
-.stProgress > div > div { background: linear-gradient(90deg, #0ea5e9, #10b981) !important; border-radius: 8px !important; }
-
-/* === DIVIDER === */
-hr { border-color: #f1f5f9 !important; margin: 1.5rem 0 !important; }
-
-/* === HEADINGS === */
-.stMarkdown h3 { font-weight: 600 !important; font-size: 1.15rem !important; color: #0f172a !important; letter-spacing: -0.01em; }
-
-/* === TOAST OVERRIDE === */
-[data-testid="stToast"] { border-radius: 10px !important; }
-
-/* === INFO/WARNING BOXES === */
-[data-testid="stAlert"] { border-radius: 10px !important; font-size: 0.85rem !important; }
+.analysis-box { background: #fff; border: 1px solid #e2e8f0; border-left: 4px solid #0ea5e9; border-radius: 0 14px 14px 0; padding: 2rem; margin: 1rem 0; font-size: 0.88rem; line-height: 1.8; }
+.stButton > button[kind="primary"] { background: linear-gradient(135deg, #0369a1, #0ea5e9) !important; color: white !important; border: none !important; border-radius: 10px !important; font-weight: 600 !important; }
+.stTabs [aria-selected="true"] { background: #f0f9ff !important; color: #0369a1 !important; }
+[data-testid="stFileUploader"] { border: 2px dashed #d1d9e6 !important; border-radius: 14px !important; background: #f8fafc !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -243,7 +73,7 @@ defaults = {
     "tech_summary": "", "tech_keywords_en": "",
     "search_queries": [],
     "patents_raw": [], "patents_filtered": [],
-    "openalex_results": [], "analysis": "", "doc_content": "",
+    "openalex_results": [], "analysis": "", "doc_content": "", "xlsx_content": "",
     "page": "main",
 }
 for k, v in defaults.items():
@@ -256,436 +86,526 @@ for k, v in defaults.items():
 with st.sidebar:
     st.markdown("### ⚙️ Nastavení")
     st.caption("API klíče platí jen pro tuto session.")
-    gemini_key = st.text_input("Gemini API Key", value=os.environ.get("GEMINI_API_KEY", ""), type="password", help="https://aistudio.google.com/apikey")
-    serpapi_key = st.text_input("SerpApi Key", value=os.environ.get("SERPAPI_KEY", ""), type="password", help="https://serpapi.com")
+    gemini_key = st.text_input("Gemini API Key", value=os.environ.get("GEMINI_API_KEY", ""), type="password")
+    serpapi_key = st.text_input("SerpApi Key", value=os.environ.get("SERPAPI_KEY", ""), type="password")
     st.divider()
     st.markdown("### 📊 Parametry")
     max_patents_per_query = st.slider("Patentů na dotaz", 10, 50, 25)
     max_openalex = st.slider("Max článků z OpenAlex", 5, 50, 30)
     relevance_threshold = st.slider("Min. relevance (0-10)", 0, 10, 5)
     st.divider()
-    if st.button("📂 Historie analýz"):
-        st.session_state.page = "history"
-        st.rerun()
-    if st.button("🔬 Nová analýza"):
-        st.session_state.page = "main"
-        st.rerun()
+    if st.button("📂 Historie analýz"): st.session_state.page = "history"; st.rerun()
+    if st.button("🔬 Nová analýza"): st.session_state.page = "main"; st.rerun()
     st.divider()
-    st.caption("AI Transfer System V4.0\nFZÚ AV ČR")
+    st.caption("AI Transfer System V5.0\nFZÚ AV ČR")
 
 # ---------------------------------------------------------------------------
-# CORE: GEMINI WITH RETRY
+# GEMINI WITH MULTI-MODEL FALLBACK
 # ---------------------------------------------------------------------------
-def call_gemini(api_key: str, prompt: str, system_instruction: str = "", max_retries: int = 5) -> str:
-    """Call Gemini with multi-model fallback: 2.5 Flash → 2.5 Flash-Lite → 1.5 Flash."""
+def call_gemini(api_key, prompt, system_instruction="", max_retries=5):
     models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
-
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         if system_instruction:
             payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
         payload["generationConfig"] = {"temperature": 0.2, "maxOutputTokens": 8192}
-
         for attempt in range(max_retries):
             try:
                 resp = requests.post(url, json=payload, timeout=120)
                 if resp.status_code == 200:
-                    data = resp.json()
-                    try:
-                        return data["candidates"][0]["content"]["parts"][0]["text"]
-                    except (KeyError, IndexError):
-                        raise Exception(f"Unexpected response: {json.dumps(data)[:500]}")
+                    return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
                 elif resp.status_code in (429, 503):
                     wait = (2 ** attempt) * 2 + random.uniform(1, 3)
                     if attempt < max_retries - 1:
-                        st.toast(f"⏳ {model} přetížen, čekám {wait:.0f}s... (pokus {attempt+1}/{max_retries})")
+                        st.toast(f"⏳ {model} přetížen, čekám {wait:.0f}s...")
                         time.sleep(wait)
                     else:
-                        break  # Try next model
+                        break
                 else:
-                    raise Exception(f"Gemini error {resp.status_code}: {resp.text[:500]}")
+                    raise Exception(f"Gemini {resp.status_code}: {resp.text[:300]}")
             except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    st.toast(f"⏳ {model} timeout, zkouším znovu...")
-                    time.sleep(3)
-                else:
-                    break
-
-        st.toast(f"⚠️ {model} nedostupný, zkouším další model...")
+                if attempt < max_retries - 1: time.sleep(3)
+                else: break
+        st.toast(f"⚠️ {model} nedostupný, zkouším další...")
         time.sleep(2)
-
-    raise Exception("Všechny Gemini modely jsou přetížené. Zkus to za pár minut.")
-
-# ---------------------------------------------------------------------------
-# PDF
-# ---------------------------------------------------------------------------
-def extract_pdf_text(uploaded_file) -> str:
-    try:
-        import PyPDF2
-        reader = PyPDF2.PdfReader(uploaded_file)
-        return "\n".join(p.extract_text() for p in reader.pages if p.extract_text())
-    except Exception as e:
-        st.error(f"Chyba PDF: {e}")
-        return ""
+    raise Exception("Všechny Gemini modely přetížené. Zkus za chvíli.")
 
 # ---------------------------------------------------------------------------
-# STEP 1: ANALYZE DOCUMENT — summary + keywords + queries
+# HELPERS
 # ---------------------------------------------------------------------------
-def analyze_document(api_key: str, doc_text: str) -> dict:
-    """Extract tech summary, English keywords, and 3 search queries."""
+def extract_pdf_text(f):
+    import PyPDF2
+    reader = PyPDF2.PdfReader(f)
+    return "\n".join(p.extract_text() for p in reader.pages if p.extract_text())
+
+def extract_country(patent_id):
+    """Extract filing country from patent ID like US20210001234A1 → US"""
+    if not patent_id or patent_id == "—": return "—"
+    m = re.match(r'^([A-Z]{2})', patent_id)
+    return m.group(1) if m else "—"
+
+def extract_year(date_str):
+    """Extract year from various date formats."""
+    if not date_str or date_str == "—": return None
+    m = re.search(r'(\d{4})', str(date_str))
+    return int(m.group(1)) if m else None
+
+def strip_markdown(text):
+    """Remove ** and other markdown from text for clean docx output."""
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **bold** → bold
+    text = re.sub(r'\*(.*?)\*', r'\1', text)  # *italic* → italic
+    text = re.sub(r'#{1,6}\s*', '', text)  # ### heading → heading
+    text = re.sub(r'`(.*?)`', r'\1', text)  # `code` → code
+    return text
+
+def compute_stats(patents):
+    """Compute patent statistics: top assignees, filings by year."""
+    # Top assignees
+    assignees = [p["applicant"] for p in patents if p["applicant"] != "—"]
+    assignee_counts = Counter(assignees).most_common(20)
+
+    # Filings by year
+    years = [extract_year(p["filing_date"]) for p in patents]
+    years = [y for y in years if y and 2000 <= y <= 2030]
+    year_counts = Counter(years)
+    year_range = range(min(year_counts.keys()) if year_counts else 2000,
+                       (max(year_counts.keys()) if year_counts else 2025) + 1)
+    yearly = [(y, year_counts.get(y, 0)) for y in year_range]
+
+    # Countries
+    countries = [extract_country(p["pub_number"]) for p in patents]
+    country_counts = Counter(c for c in countries if c != "—").most_common(10)
+
+    return {"assignees": assignee_counts, "yearly": yearly, "countries": country_counts}
+
+# ---------------------------------------------------------------------------
+# STEP 1: ANALYZE DOCUMENT
+# ---------------------------------------------------------------------------
+def analyze_document(api_key, doc_text):
     system = """You are an expert in patent research and technology transfer.
-
 TASK: Based on the technical document, generate:
-1. A concise technology summary in Czech (2-3 sentences) — what it is, what makes it unique, what is the principle
-2. 5-8 English keywords/keyphrases for searching scientific databases (OpenAlex)
-3. THREE different Google Patents search queries from different angles:
-   - QUERY 1 (COMPETITORS): Patents on the SAME or SIMILAR technology/method/process
-   - QUERY 2 (APPLICATIONS): Patents on PRODUCTS and DEVICES that could USE this technology
-   - QUERY 3 (MATERIAL/DOMAIN): Patents on the same material/substance/domain in other contexts
-
-OUTPUT FORMAT (follow exactly):
+1. A concise technology summary in Czech (2-3 sentences)
+2. 5-8 English keywords/keyphrases for searching scientific databases
+3. THREE different Google Patents search queries:
+   - QUERY 1 (COMPETITORS): Same/similar technology/method
+   - QUERY 2 (APPLICATIONS): Products that could use this technology
+   - QUERY 3 (MATERIAL/DOMAIN): Same material in other contexts
+OUTPUT FORMAT:
 SUMMARY: [Czech summary]
 KEYWORDS: [comma-separated English keywords]
-QUERY1: [Google Patents query for competitors]
-QUERY2: [Google Patents query for applications]
-QUERY3: [Google Patents query for material/domain]
-
-RULES FOR QUERIES:
-- Each query max 2-3 phrases connected by AND/OR
-- Phrases in quotes, max 3 words per phrase
-- In English
-- NO markdown, NO explanations, NO numbering beyond the format above
-
-RULES FOR KEYWORDS:
-- English only
-- Specific to this technology (not generic like "nanotechnology")
-- Mix of method keywords and application keywords
-- Example: "ZnO nanotetrapod, microwave synthesis, zinc oxide nanostructure, gas sensor, photocatalyst, UV absorption"
-"""
-    prompt = f"Analyze this document:\n\n{doc_text[:8000]}"
-    result = call_gemini(api_key, prompt, system)
-
-    summary = ""
-    keywords = ""
-    queries = []
+QUERY1: [query]
+QUERY2: [query]
+QUERY3: [query]
+RULES: Each query max 2-3 phrases with AND/OR. Quotes. English. NO markdown."""
+    result = call_gemini(api_key, f"Analyze:\n\n{doc_text[:8000]}", system)
+    summary, keywords, queries = "", "", []
     for line in result.strip().split("\n"):
         line = line.strip()
-        if line.startswith("SUMMARY:"):
-            summary = line[8:].strip()
-        elif line.startswith("KEYWORDS:"):
-            keywords = line[9:].strip()
+        if line.startswith("SUMMARY:"): summary = line[8:].strip()
+        elif line.startswith("KEYWORDS:"): keywords = line[9:].strip()
         elif line.startswith("QUERY"):
-            q = line.split(":", 1)[-1].strip().strip("`").strip('"').strip("'")
-            q = re.sub(r"^```.*\n?", "", q)
-            q = re.sub(r"\n?```$", "", q)
-            if q:
-                queries.append(q.strip())
-
-    if not queries:
-        queries = [result.strip().strip("`")]
-
-    return {"summary": summary, "keywords": keywords, "queries": queries}
+            q = line.split(":", 1)[-1].strip().strip("`\"'")
+            if q: queries.append(q)
+    return {"summary": summary or "—", "keywords": keywords or "—", "queries": queries or [result.strip()]}
 
 # ---------------------------------------------------------------------------
 # STEP 2: SEARCH GOOGLE PATENTS
 # ---------------------------------------------------------------------------
-def search_google_patents(api_key: str, query: str, max_results: int = 25) -> list:
-    url = "https://serpapi.com/search.json"
-    patents = []
-    page_num = 1
+def search_google_patents(api_key, query, max_results=25):
+    patents, page_num = [], 1
     while len(patents) < max_results:
-        params = {"engine": "google_patents", "q": query, "api_key": api_key, "num": min(max_results, 100), "page": page_num}
-        resp = requests.get(url, params=params, timeout=30)
-        if resp.status_code != 200:
-            raise Exception(f"SerpApi error ({resp.status_code}): {resp.text[:500]}")
+        resp = requests.get("https://serpapi.com/search.json",
+            params={"engine": "google_patents", "q": query, "api_key": api_key, "num": 100, "page": page_num}, timeout=30)
+        if resp.status_code != 200: raise Exception(f"SerpApi {resp.status_code}")
         data = resp.json()
-        results = data.get("organic_results", [])
-        if not results:
-            break
-        for r in results:
-            if len(patents) >= max_results:
-                break
-            if r.get("is_scholar"):
-                continue
+        for r in data.get("organic_results", []):
+            if len(patents) >= max_results: break
+            if r.get("is_scholar"): continue
+            pid = r.get("patent_id", "—") or "—"
             patents.append({
                 "title": r.get("title", "—") or "—",
                 "abstract": (r.get("snippet", "—") or "—")[:500],
                 "applicant": r.get("assignee", "—") or "—",
                 "inventor": r.get("inventor", "—") or "—",
-                "pub_number": r.get("patent_id", "—") or "—",
+                "pub_number": pid,
                 "filing_date": r.get("filing_date", "—") or "—",
                 "grant_date": r.get("grant_date", "—") or "—",
+                "country": extract_country(pid),
                 "cpc": r.get("cpc", "—") or "—",
                 "pdf_link": r.get("pdf", ""),
                 "gp_link": r.get("patent_link", r.get("link", "")),
                 "relevance": 0, "rel_type": "—", "rel_reason": "Nefiltrováno",
             })
-        if not data.get("serpapi_pagination", {}).get("next"):
-            break
-        page_num += 1
-        time.sleep(0.3)
+        if not data.get("organic_results") or not data.get("serpapi_pagination", {}).get("next"): break
+        page_num += 1; time.sleep(0.3)
     return patents
 
 # ---------------------------------------------------------------------------
-# STEP 3: AI RELEVANCE FILTER (batched)
+# STEP 3: AI RELEVANCE FILTER
 # ---------------------------------------------------------------------------
-def filter_patents(api_key: str, patents: list, tech_summary: str, threshold: int = 5) -> list:
-    if not patents:
-        return []
-
-    system = """You are a patent relevance expert. Score each patent's relevance to the given technology.
-
-For EACH patent, return EXACTLY one line:
-NUMBER|SCORE|TYPE|REASON
-
-Where:
-- NUMBER = patent index number (as listed)
-- SCORE = 0-10 (10 = direct competitor/identical technology, 7-9 = highly relevant, 4-6 = partially relevant, 0-3 = irrelevant)
-- TYPE = COMPETITOR / PARTNER / CUSTOMER / IRRELEVANT
-- REASON = max 10 words why
-
-BE STRICT:
-- A patent is COMPETITOR (7-10) only if it describes a similar manufacturing/synthesis method or identical product
-- A patent is CUSTOMER (5-7) only if it describes a product/device that could directly use this technology
-- A patent is PARTNER (5-7) only if the applicant works in a closely related field
-- Everything else is IRRELEVANT (0-3) — this includes patents that share a keyword but are in a completely different domain
-
-OUTPUT: Only lines in NUMBER|SCORE|TYPE|REASON format. Nothing else."""
+def filter_patents(api_key, patents, tech_summary, threshold=5):
+    if not patents: return []
+    system = """You are a patent relevance expert. Score each patent vs the given technology.
+For EACH patent return one line: NUMBER|SCORE|TYPE|REASON
+- SCORE 0-10 (10=identical technology, 7-9=very relevant, 4-6=partial, 0-3=irrelevant)
+- TYPE = COMPETITOR/PARTNER/CUSTOMER/IRRELEVANT
+- REASON = max 10 words
+EVALUATION CRITERIA (be transparent):
+- Compare the patent ABSTRACT with the technology description
+- COMPETITOR: similar synthesis/manufacturing method OR identical product
+- CUSTOMER: product/device that could directly use this technology as input
+- PARTNER: works in closely related field, complementary capability
+- IRRELEVANT: keyword overlap only, different domain entirely
+BE STRICT. Only NUMBER|SCORE|TYPE|REASON lines."""
 
     BATCH = 15
     scores = {}
     for start in range(0, len(patents), BATCH):
-        batch = patents[start:start + BATCH]
-        plist = "\n".join(f"{start+i}. {p['title']} | {p['applicant']} | {p['abstract'][:120]}" for i, p in enumerate(batch))
-        prompt = f"OUR TECHNOLOGY:\n{tech_summary}\n\nPATENTS TO SCORE:\n{plist}"
+        batch = patents[start:start+BATCH]
+        plist = "\n".join(f"{start+i}. {p['title']} | {p['applicant']} | {p['abstract'][:150]}" for i, p in enumerate(batch))
         try:
-            result = call_gemini(api_key, prompt, system)
+            result = call_gemini(api_key, f"TECHNOLOGY:\n{tech_summary}\n\nPATENTS:\n{plist}", system)
             for line in result.strip().split("\n"):
-                line = line.strip()
-                if not line or line.startswith("#") or line.startswith("*"):
-                    continue
-                parts = line.split("|")
+                parts = line.strip().split("|")
                 if len(parts) >= 3:
                     try:
                         idx = int(parts[0].strip().rstrip("."))
-                        score = min(int(parts[1].strip()), 10)
-                        rtype = parts[2].strip()
-                        reason = parts[3].strip() if len(parts) > 3 else "—"
-                        scores[idx] = (score, rtype, reason)
-                    except (ValueError, IndexError):
-                        continue
-        except Exception:
-            for i in range(len(batch)):
-                scores[start + i] = (3, "—", "Filtr selhal")
+                        scores[idx] = (min(int(parts[1].strip()), 10), parts[2].strip(), parts[3].strip() if len(parts)>3 else "—")
+                    except: pass
+        except: pass
         time.sleep(0.5)
 
     filtered = []
     for i, p in enumerate(patents):
-        if i in scores:
-            p["relevance"], p["rel_type"], p["rel_reason"] = scores[i]
-        else:
-            p["relevance"], p["rel_type"], p["rel_reason"] = 2, "—", "Neohodnoceno"
-        if p["relevance"] >= threshold:
-            filtered.append(p)
+        if i in scores: p["relevance"], p["rel_type"], p["rel_reason"] = scores[i]
+        else: p["relevance"], p["rel_type"], p["rel_reason"] = 2, "—", "Neohodnoceno"
+        if p["relevance"] >= threshold: filtered.append(p)
     filtered.sort(key=lambda x: x["relevance"], reverse=True)
     return filtered
 
 # ---------------------------------------------------------------------------
-# STEP 4: OPENALEX (using English keywords)
+# STEP 4: OPENALEX
 # ---------------------------------------------------------------------------
-def search_openalex(keywords: str, max_results: int = 30) -> list:
-    """Search OpenAlex using English keywords extracted by Gemini."""
-    # Clean keywords for search
-    query = keywords.strip()
-    query = re.sub(r'["\(\)]', '', query)
-    # Take first few keywords if too long
-    parts = [k.strip() for k in query.split(",")]
-    query = " ".join(parts[:5])
-    if not query:
-        return []
-
-    url = "https://api.openalex.org/works"
-    params = {"search": query, "per_page": max_results, "sort": "relevance_score:desc", "mailto": "transfer@fzu.cz"}
-    resp = requests.get(url, params=params, timeout=30)
-    if resp.status_code != 200:
-        return []
-
+def search_openalex(keywords, max_results=30):
+    query = re.sub(r'["\(\)]', '', keywords.strip())
+    parts = [k.strip() for k in query.split(",")][:5]
+    query = " ".join(parts)
+    if not query: return []
+    resp = requests.get("https://api.openalex.org/works",
+        params={"search": query, "per_page": max_results, "sort": "relevance_score:desc", "mailto": "transfer@fzu.cz"}, timeout=30)
+    if resp.status_code != 200: return []
     results = []
-    for work in resp.json().get("results", []):
-        institutions = []
-        is_commercial = False
-        for authorship in work.get("authorships", []):
-            for inst in authorship.get("institutions", []):
-                name = inst.get("display_name", "")
-                itype = inst.get("type", "")
-                institutions.append(name)
-                if itype in ("company", "facility") or any(t in name.lower() for t in ["inc.", "ltd.", "gmbh", "a.s.", "corp.", "co.", "llc", "ag", "s.r.o."]):
-                    is_commercial = True
-        results.append({
-            "title": work.get("title", "—") or "—", "year": work.get("publication_year", "—"),
-            "cited_by": work.get("cited_by_count", 0), "institutions": list(set(institutions))[:5],
-            "is_commercial": is_commercial, "doi": work.get("doi", ""), "type": work.get("type", ""),
-        })
+    for w in resp.json().get("results", []):
+        insts, is_com = [], False
+        for a in w.get("authorships", []):
+            for inst in a.get("institutions", []):
+                n = inst.get("display_name", "")
+                insts.append(n)
+                if inst.get("type") in ("company","facility") or any(t in n.lower() for t in ["inc.","ltd.","gmbh","a.s.","corp.","co.","llc","ag"]): is_com = True
+        results.append({"title": w.get("title","—") or "—", "year": w.get("publication_year","—"),
+            "cited_by": w.get("cited_by_count",0), "institutions": list(set(insts))[:5], "is_commercial": is_com,
+            "doi": w.get("doi",""), "type": w.get("type","")})
     return results
 
 # ---------------------------------------------------------------------------
-# STEP 5: CRITICAL ANALYSIS
+# STEP 5: ANALYSIS
 # ---------------------------------------------------------------------------
-def run_analysis(api_key: str, tech_summary: str, patents: list, openalex: list, pdf_text: str) -> str:
-    system = """You are a CRITICAL technology transfer expert working for a TTO (Technology Transfer Office) at a Czech research institute.
+def run_analysis(api_key, tech_summary, patents, openalex, pdf_text, stats):
+    system = """You are a CRITICAL technology transfer expert at a Czech TTO.
+INSTRUCTIONS:
+- Be REALISTIC, not optimistic
+- If data shows weak signals, say it honestly
+- Do not suggest partners without evidence
+- Write in CZECH
+- Do NOT use markdown formatting (no **, no ##, no *, no `)
+- Use plain text only. For emphasis, use CAPS or write "Důležité:" before a sentence."""
 
-CRITICAL INSTRUCTIONS:
-- Be REALISTIC and CRITICAL, not optimistic
-- If data does not show clear commercial signals, SAY IT
-- Do not suggest companies as partners without concrete evidence in the data
-- Distinguish between DIRECT competitors (same technology) and DISTANT players (different field, keyword overlap)
-- Ignore patents that have nothing to do with the technology
-- For GO/NO-GO be honest — if the technology is too early-stage or the market is small, say it
-- Write in CZECH"""
+    assignee_table = "\n".join(f"  {name}: {count} patentů" for name, count in stats["assignees"][:10])
+    yearly_str = "\n".join(f"  {y}: {c} patentů" for y, c in stats["yearly"] if c > 0)
 
-    pat_sum = "\n".join(
-        f"- {p['title']} | {p['applicant']} | Relevance: {p.get('relevance','?')}/10 | Type: {p.get('rel_type','?')} | {p.get('rel_reason','')}"
-        for p in patents[:20]
-    )
-    pub_sum = "\n".join(
-        f"- {p['title']} ({p['year']}) | Citations: {p['cited_by']} | {', '.join(p['institutions'][:2])}"
-        for p in openalex[:15]
-    )
+    pat_sum = "\n".join(f"- {p['title']} | {p['applicant']} | {p.get('relevance','?')}/10 | {p.get('rel_type','?')} | {p.get('rel_reason','')}" for p in patents[:20])
+    pub_sum = "\n".join(f"- {p['title']} ({p['year']}) | Citací: {p['cited_by']} | {', '.join(p['institutions'][:2])}" for p in openalex[:15])
     commercial = [r for r in openalex if r["is_commercial"]]
-    com_sum = "\n".join(f"- {c['title']} | Companies: {', '.join(c['institutions'][:3])}" for c in commercial) if commercial else "None found."
+    com_sum = "\n".join(f"- {c['title']} | {', '.join(c['institutions'][:3])}" for c in commercial) if commercial else "Žádné."
 
-    prompt = f"""OUR TECHNOLOGY:
-{tech_summary}
+    prompt = f"""TECHNOLOGIE: {tech_summary}
 
-RELEVANT PATENTS (after AI filtering, sorted by relevance):
+TOP PŘIHLAŠOVATELÉ PATENTŮ (dle četnosti):
+{assignee_table}
+
+VÝVOJ PATENTOVÉ AKTIVITY PO LETECH:
+{yearly_str}
+
+RELEVANTNÍ PATENTY ({len(patents)}):
 {pat_sum}
 
-SCIENTIFIC PUBLICATIONS:
+PUBLIKACE ({len(openalex)}):
 {pub_sum}
 
-PUBLICATIONS WITH COMMERCIAL COLLABORATION:
+KOMERČNÍ SPOLUPRÁCE V PUBLIKACÍCH:
 {com_sum}
 
-SOURCE DOCUMENT EXCERPT:
+ZDROJOVÝ DOKUMENT:
 {pdf_text[:2000]}
 
-Provide a CRITICAL analysis in CZECH:
-1. SHRNUTÍ TECHNOLOGIE (2-3 sentences)
-2. PATENTOVÁ KRAJINA (who are the REAL competitors — only based on data)
-3. KOMERČNÍ SIGNÁLY (what SPECIFICALLY in the data indicates commercial interest — be honest if signals are weak)
-4. POTENCIÁLNÍ PARTNEŘI (ONLY companies with concrete evidence in patents or publications)
-5. RIZIKA A SLABINY (what could prevent commercialization)
-6. GO / CONDITIONAL GO / NO-GO DOPORUČENÍ (with honest reasoning)
-7. DOPORUČENÝ DALŠÍ POSTUP (concrete, realistic steps)"""
+Proveď KRITICKOU analýzu v češtině (BEZ markdown formátování, BEZ hvězdiček):
+1. SHRNUTÍ TECHNOLOGIE (2-3 věty)
+2. PATENTOVÁ KRAJINA
+   - Hlavní hráči (na základě tabulky přihlašovatelů)
+   - Trend patentové aktivity (roste/klesá/stagnuje)
+   - Geografické rozložení
+3. KOMERČNÍ SIGNÁLY (konkrétní důkazy z dat)
+4. POTENCIÁLNÍ PARTNEŘI (pouze s důkazem v datech)
+5. RIZIKA A SLABINY
+6. GO / CONDITIONAL GO / NO-GO
+7. DOPORUČENÝ DALŠÍ POSTUP"""
 
     return call_gemini(api_key, prompt, system)
 
 # ---------------------------------------------------------------------------
-# DOCX EXPORT
+# XLSX EXPORT
 # ---------------------------------------------------------------------------
-def generate_docx(tech_summary, queries, patents_raw_count, patents, openalex, analysis, pdf_filename, threshold) -> io.BytesIO:
+def generate_xlsx(patents, openalex, tech_summary):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    wb = Workbook()
+
+    # Sheet 1: Patents
+    ws = wb.active
+    ws.title = "Patenty"
+    headers = ["#", "Název", "Vynálezce", "Majitel", "Datum podání", "Stát", "Číslo patentu", "Klasifikace (CPC)", "Relevance", "Typ", "Důvod relevance", "Abstrakt", "Odkaz"]
+    hfont = Font(bold=True, size=10, color="FFFFFF")
+    hfill = PatternFill(start_color="0C4A6E", end_color="0C4A6E", fill_type="solid")
+    thin = Side(style='thin', color='D1D9E6')
+    border = Border(bottom=thin)
+
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=col, value=h)
+        c.font = hfont; c.fill = hfill; c.alignment = Alignment(horizontal='center', wrap_text=True)
+
+    for idx, p in enumerate(patents, 1):
+        row = idx + 1
+        ws.cell(row=row, column=1, value=idx)
+        ws.cell(row=row, column=2, value=p["title"])
+        ws.cell(row=row, column=3, value=p.get("inventor", "—"))
+        ws.cell(row=row, column=4, value=p["applicant"])
+        ws.cell(row=row, column=5, value=p.get("filing_date", "—"))
+        ws.cell(row=row, column=6, value=p.get("country", extract_country(p.get("pub_number",""))))
+        ws.cell(row=row, column=7, value=p["pub_number"])
+        ws.cell(row=row, column=8, value=p.get("cpc", "—"))
+        ws.cell(row=row, column=9, value=p.get("relevance", 0))
+        ws.cell(row=row, column=10, value=p.get("rel_type", "—"))
+        ws.cell(row=row, column=11, value=p.get("rel_reason", "—"))
+        ws.cell(row=row, column=12, value=p.get("abstract", "—"))
+        ws.cell(row=row, column=13, value=p.get("gp_link", ""))
+        for col in range(1, 14):
+            ws.cell(row=row, column=col).font = Font(size=9)
+            ws.cell(row=row, column=col).alignment = Alignment(wrap_text=True, vertical='top')
+            ws.cell(row=row, column=col).border = border
+
+    ws.column_dimensions['A'].width = 4
+    ws.column_dimensions['B'].width = 40
+    ws.column_dimensions['C'].width = 25
+    ws.column_dimensions['D'].width = 25
+    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions['F'].width = 6
+    ws.column_dimensions['G'].width = 18
+    ws.column_dimensions['H'].width = 20
+    ws.column_dimensions['I'].width = 8
+    ws.column_dimensions['J'].width = 12
+    ws.column_dimensions['K'].width = 25
+    ws.column_dimensions['L'].width = 50
+    ws.column_dimensions['M'].width = 30
+    ws.auto_filter.ref = ws.dimensions
+
+    # Sheet 2: Publications
+    ws2 = wb.create_sheet("Publikace")
+    pub_headers = ["#", "Název", "Rok", "Citací", "Komerční", "Instituce", "Typ", "DOI"]
+    for col, h in enumerate(pub_headers, 1):
+        c = ws2.cell(row=1, column=col, value=h)
+        c.font = hfont; c.fill = hfill
+    for idx, p in enumerate(openalex, 1):
+        row = idx + 1
+        ws2.cell(row=row, column=1, value=idx)
+        ws2.cell(row=row, column=2, value=p["title"])
+        ws2.cell(row=row, column=3, value=p["year"])
+        ws2.cell(row=row, column=4, value=p["cited_by"])
+        ws2.cell(row=row, column=5, value="Ano" if p["is_commercial"] else "Ne")
+        ws2.cell(row=row, column=6, value=", ".join(p["institutions"][:4]))
+        ws2.cell(row=row, column=7, value=p["type"])
+        ws2.cell(row=row, column=8, value=p.get("doi", ""))
+    ws2.column_dimensions['B'].width = 50
+    ws2.column_dimensions['F'].width = 40
+    ws2.auto_filter.ref = ws2.dimensions
+
+    # Sheet 3: Statistics
+    ws3 = wb.create_sheet("Statistiky")
+    ws3.cell(row=1, column=1, value="Top přihlašovatelé patentů").font = Font(bold=True, size=12)
+    ws3.cell(row=2, column=1, value="Firma/Instituce").font = Font(bold=True)
+    ws3.cell(row=2, column=2, value="Počet patentů").font = Font(bold=True)
+    stats = compute_stats(patents)
+    for i, (name, count) in enumerate(stats["assignees"], 3):
+        ws3.cell(row=i, column=1, value=name)
+        ws3.cell(row=i, column=2, value=count)
+    ws3.column_dimensions['A'].width = 40
+    ws3.column_dimensions['B'].width = 15
+
+    row_start = len(stats["assignees"]) + 5
+    ws3.cell(row=row_start, column=1, value="Patentová aktivita po letech").font = Font(bold=True, size=12)
+    ws3.cell(row=row_start+1, column=1, value="Rok").font = Font(bold=True)
+    ws3.cell(row=row_start+1, column=2, value="Počet patentů").font = Font(bold=True)
+    for i, (year, count) in enumerate(stats["yearly"], row_start+2):
+        ws3.cell(row=i, column=1, value=year)
+        ws3.cell(row=i, column=2, value=count)
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return buf
+
+# ---------------------------------------------------------------------------
+# DOCX EXPORT (fixed — no ** markdown)
+# ---------------------------------------------------------------------------
+def generate_docx(tech_summary, queries, patents_raw_count, patents, openalex, analysis, pdf_filename, threshold, stats):
     from docx import Document
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Pt, RGBColor, Cm, Inches
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
 
     doc = Document()
-    s = doc.styles["Normal"]; s.font.name = "Calibri"; s.font.size = Pt(10.5); s.paragraph_format.space_after = Pt(6)
+    s = doc.styles["Normal"]; s.font.name = "Calibri"; s.font.size = Pt(10.5)
+    s.paragraph_format.space_after = Pt(6)
+
+    # Title
     p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run("AI Transfer System — Rešeršní zpráva"); r.bold = True; r.font.size = Pt(22); r.font.color.rgb = RGBColor(15, 23, 42)
     p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run(f"Zdroj: {pdf_filename}  |  {datetime.now().strftime('%d. %m. %Y %H:%M')}"); r.font.size = Pt(10); r.font.color.rgb = RGBColor(100, 116, 139)
     doc.add_page_break()
 
+    # 1. Summary
     doc.add_heading("1. Shrnutí technologie", level=1)
-    doc.add_paragraph(tech_summary)
+    doc.add_paragraph(strip_markdown(tech_summary))
 
+    # 2. Queries
     doc.add_heading("2. Vyhledávací dotazy", level=1)
     for i, q in enumerate(queries, 1):
         p = doc.add_paragraph(); r = p.add_run(f"Dotaz {i}: "); r.bold = True
         r2 = p.add_run(q); r2.font.name = "Consolas"; r2.font.size = Pt(10); r2.font.color.rgb = RGBColor(3, 105, 161)
 
-    doc.add_heading("3. Nalezené patenty", level=1)
-    doc.add_paragraph(f"Celkem: {patents_raw_count} | Po filtraci (práh {threshold}/10): {len(patents)}")
-    if patents:
-        t = doc.add_table(rows=1, cols=6); t.style = "Light Grid Accent 1"
-        for i, h in enumerate(["#", "Název", "Přihlašovatel", "Číslo", "Rel.", "Typ"]):
+    # 3. Assignee frequency table
+    doc.add_heading("3. Přehled přihlašovatelů patentů", level=1)
+    doc.add_paragraph(f"Celkem nalezeno {patents_raw_count} patentů, po filtraci relevance: {len(patents)}")
+    if stats["assignees"]:
+        t = doc.add_table(rows=1, cols=3); t.style = "Light Grid Accent 1"
+        for i, h in enumerate(["#", "Firma / Instituce", "Počet patentů"]):
             c = t.rows[0].cells[i]; c.text = h
             for pg in c.paragraphs:
                 for rn in pg.runs: rn.bold = True; rn.font.size = Pt(9)
-        for idx, pat in enumerate(patents, 1):
+        for idx, (name, count) in enumerate(stats["assignees"][:15], 1):
             row = t.add_row().cells
-            row[0].text = str(idx); row[1].text = pat["title"][:70]; row[2].text = pat["applicant"][:35]
-            row[3].text = pat["pub_number"]; row[4].text = f"{pat.get('relevance','?')}/10"; row[5].text = pat.get("rel_type", "—")
+            row[0].text = str(idx); row[1].text = name; row[2].text = str(count)
             for c in row:
                 for pg in c.paragraphs:
-                    for rn in pg.runs: rn.font.size = Pt(8.5)
+                    for rn in pg.runs: rn.font.size = Pt(9)
 
-    doc.add_heading("4. Vědecké publikace (OpenAlex)", level=1)
+    # 4. Yearly filing trend
+    doc.add_heading("4. Vývoj patentové aktivity po letech", level=1)
+    if stats["yearly"]:
+        t = doc.add_table(rows=1, cols=2); t.style = "Light Grid Accent 1"
+        t.rows[0].cells[0].text = "Rok"; t.rows[0].cells[1].text = "Počet patentů"
+        for pg in t.rows[0].cells[0].paragraphs:
+            for rn in pg.runs: rn.bold = True; rn.font.size = Pt(9)
+        for pg in t.rows[0].cells[1].paragraphs:
+            for rn in pg.runs: rn.bold = True; rn.font.size = Pt(9)
+        for year, count in stats["yearly"]:
+            if count > 0:
+                row = t.add_row().cells
+                row[0].text = str(year); row[1].text = str(count)
+
+    # 5. Patent table
+    doc.add_heading("5. Tabulka patentů (filtrované)", level=1)
+    if patents:
+        t = doc.add_table(rows=1, cols=7); t.style = "Light Grid Accent 1"
+        for i, h in enumerate(["#", "Název", "Majitel", "Vynálezce", "Stát", "Datum", "Rel."]):
+            c = t.rows[0].cells[i]; c.text = h
+            for pg in c.paragraphs:
+                for rn in pg.runs: rn.bold = True; rn.font.size = Pt(8)
+        for idx, pat in enumerate(patents[:30], 1):
+            row = t.add_row().cells
+            row[0].text = str(idx); row[1].text = pat["title"][:60]; row[2].text = pat["applicant"][:30]
+            row[3].text = pat.get("inventor","—")[:30]; row[4].text = pat.get("country","—")
+            row[5].text = pat.get("filing_date","—"); row[6].text = f"{pat.get('relevance','?')}/10"
+            for c in row:
+                for pg in c.paragraphs:
+                    for rn in pg.runs: rn.font.size = Pt(8)
+
+    # 6. Publications
+    doc.add_heading("6. Vědecké publikace (OpenAlex)", level=1)
     doc.add_paragraph(f"Celkem: {len(openalex)} článků")
     commercial = [r for r in openalex if r["is_commercial"]]
     if commercial:
         doc.add_heading("Články s komerční spoluprací:", level=2)
-        for r in commercial:
+        for r in commercial[:10]:
             p = doc.add_paragraph(style="List Bullet")
             rn = p.add_run(f"{r['title']} ({r['year']})"); rn.bold = True; rn.font.size = Pt(9.5)
             p.add_run(f"\n   Instituce: {', '.join(r['institutions'][:3])}")
-            p.add_run(f"\n   Citováno: {r['cited_by']}×")
 
-    doc.add_heading("5. AI Analýza komerčního potenciálu", level=1)
-    for line in analysis.split("\n"):
-        if line.strip(): doc.add_paragraph(line.strip())
+    # 7. AI Analysis (strip markdown!)
+    doc.add_heading("7. AI Analýza komerčního potenciálu", level=1)
+    clean_analysis = strip_markdown(analysis)
+    for line in clean_analysis.split("\n"):
+        line = line.strip()
+        if not line: continue
+        # Detect section headers (lines ending with :)
+        if re.match(r'^\d+\.', line) or line.endswith(':'):
+            p = doc.add_paragraph()
+            r = p.add_run(line); r.bold = True; r.font.size = Pt(11)
+        else:
+            doc.add_paragraph(line)
 
     doc.add_page_break()
     doc.add_heading("Metodologie", level=1)
-    doc.add_paragraph(f"Systém: AI Transfer System V4.0 | Patenty: Google Patents (SerpApi) | Publikace: OpenAlex | AI: Gemini 2.5 Flash | Filtr: práh {threshold}/10 | Validace: vyžaduje odbornou revizi TTO")
+    doc.add_paragraph(f"AI Transfer System V5.0 | Patenty: Google Patents (SerpApi) | Publikace: OpenAlex | AI: Gemini | Filtr relevance: práh {threshold}/10 | Výsledky vyžadují odbornou revizi TTO")
+
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf
 
 # ---------------------------------------------------------------------------
 # HISTORY
 # ---------------------------------------------------------------------------
-def save_to_history(data: dict):
+def save_to_history(data):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     name = re.sub(r'[^\w]', '_', data.get("pdf_name", "unknown"))[:40]
-    fname = HISTORY_DIR / f"{ts}_{name}.json"
-    with open(fname, "w", encoding="utf-8") as f:
+    with open(HISTORY_DIR / f"{ts}_{name}.json", "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
-def load_history() -> list:
-    files = sorted(HISTORY_DIR.glob("*.json"), reverse=True)
+def load_history():
     items = []
-    for f in files[:50]:
+    for f in sorted(HISTORY_DIR.glob("*.json"), reverse=True)[:50]:
         try:
-            with open(f, "r", encoding="utf-8") as fh:
-                d = json.load(fh)
-                d["_filename"] = f.name
-                items.append(d)
-        except Exception:
-            continue
+            with open(f, "r", encoding="utf-8") as fh: items.append(json.load(fh))
+        except: pass
     return items
 
 # ---------------------------------------------------------------------------
-# RENDER: PATENT CARD
+# RENDER CARD
 # ---------------------------------------------------------------------------
 def render_patent_card(pat, show_relevance=True):
-    applicant_html = f'<span class="applicant">{pat["applicant"]}</span>' if pat["applicant"] != "—" else ""
-    links = ""
-    if pat.get("gp_link"):
-        links += f'<a href="{pat["gp_link"]}" target="_blank" style="font-size:0.75rem;color:#0ea5e9;text-decoration:none;">↗ Google Patents</a>'
+    app_html = f'<span class="applicant">{pat["applicant"]}</span>' if pat["applicant"] != "—" else ""
+    link = f'<a href="{pat["gp_link"]}" target="_blank" style="font-size:0.75rem;color:#0ea5e9;text-decoration:none;">↗ Google Patents</a>' if pat.get("gp_link") else ""
     rel_html = ""
-    if show_relevance:
-        sc = pat.get("relevance", 0)
+    if show_relevance and pat.get("relevance", 0) > 0:
+        sc = pat["relevance"]
         cls = "rel-high" if sc >= 7 else ("rel-med" if sc >= 5 else "rel-low")
         rel_html = f'<span class="relevance {cls}">{sc}/10 · {pat.get("rel_type","—")}</span>'
-        reason = pat.get("rel_reason", "")
-        if reason and reason != "Nefiltrováno":
-            rel_html += f'<div class="meta" style="margin-top:4px;font-style:italic;">{reason}</div>'
+        if pat.get("rel_reason","") not in ("","—","Nefiltrováno"):
+            rel_html += f'<div class="meta" style="margin-top:4px;font-style:italic;">{pat["rel_reason"]}</div>'
     st.markdown(f"""<div class="patent-card">
         <h4>{pat['title']}</h4>
         <div class="meta">{pat['abstract'][:250]}{'...' if len(pat['abstract'])>250 else ''}</div>
-        <div class="meta" style="margin-top:8px;"><strong>Č.:</strong> {pat['pub_number']} · <strong>Podáno:</strong> {pat['filing_date']} · {links}</div>
-        {applicant_html} {rel_html}
+        <div class="meta" style="margin-top:8px;"><strong>Č.:</strong> {pat['pub_number']} · <strong>Stát:</strong> {pat.get('country','—')} · <strong>Podáno:</strong> {pat['filing_date']} · {link}</div>
+        {app_html} {rel_html}
     </div>""", unsafe_allow_html=True)
 
 
@@ -693,251 +613,185 @@ def render_patent_card(pat, show_relevance=True):
 # PAGE: HISTORY
 # ===========================================================================
 if st.session_state.page == "history":
-    st.markdown("""<div class="hero">
-        <div class="hero-badge">Archiv</div>
-        <h1>Historie analýz</h1>
-        <p>Přehled všech dosavadních rešerší a jejich výsledků</p>
-    </div>""", unsafe_allow_html=True)
-
-    items = load_history()
-    if not items:
-        st.info("Zatím žádné uložené analýzy. Spusť první rešerši.")
-    else:
-        for item in items:
-            ts = item.get("timestamp", "—")
-            name = item.get("pdf_name", "—")
-            summary = item.get("tech_summary", "—")[:150]
-            n_pat = len(item.get("patents_filtered", []))
-            n_pub = len(item.get("openalex_results", []))
-            with st.expander(f"📄 {name}  —  {ts}  ({n_pat} patentů, {n_pub} publikací)"):
-                st.markdown(f"**Shrnutí:** {item.get('tech_summary', '—')}")
-                st.markdown(f"**Dotazy:** {', '.join(item.get('search_queries', []))}")
-                if item.get("analysis"):
-                    st.markdown(f'<div class="analysis-box">{item["analysis"][:2000]}...</div>', unsafe_allow_html=True)
+    st.markdown("""<div class="hero"><div class="hero-badge">Archiv</div><h1>Historie analýz</h1><p>Přehled dosavadních rešerší</p></div>""", unsafe_allow_html=True)
+    for item in load_history():
+        with st.expander(f"📄 {item.get('pdf_name','—')} — {item.get('timestamp','—')}"):
+            st.markdown(f"**Shrnutí:** {item.get('tech_summary','—')}")
+            if item.get("analysis"): st.markdown(f'<div class="analysis-box">{item["analysis"][:2000]}...</div>', unsafe_allow_html=True)
+    if not load_history(): st.info("Žádné uložené analýzy.")
     st.stop()
 
-
 # ===========================================================================
-# PAGE: MAIN ANALYSIS
+# PAGE: MAIN
 # ===========================================================================
-st.markdown("""<div class="hero">
-    <div class="hero-badge">Patent & Research Intelligence</div>
-    <h1>AI Transfer System</h1>
-    <p>Automatizovaná rešerše patentů a vědeckých publikací pro hodnocení komerčního potenciálu vynálezů</p>
-    <div class="hero-org">Fyzikální ústav AV ČR — Transfer znalostí a technologií</div>
-</div>""", unsafe_allow_html=True)
+st.markdown("""<div class="hero"><div class="hero-badge">Patent & Research Intelligence</div><h1>AI Transfer System</h1><p>Automatizovaná rešerše patentů a vědeckých publikací pro hodnocení komerčního potenciálu vynálezů</p><div class="hero-org">Fyzikální ústav AV ČR — Transfer znalostí a technologií</div></div>""", unsafe_allow_html=True)
 
-phases = [("Upload PDF", 0), ("AI analýza dokumentu", 1), ("Rešerše", 2), ("AI filtr", 3), ("Analýza", 4), ("Export", 5)]
+phases = [("Upload PDF", 0), ("AI analýza", 1), ("Rešerše + filtr", 2), ("Statistiky", 3), ("Analýza", 4), ("Export", 5)]
 phase_html = '<div class="phase-bar">'
 for label, idx in phases:
     cls = "phase-done" if idx < st.session_state.phase else ("phase-active" if idx == st.session_state.phase else "phase-pending")
     phase_html += f'<span class="phase-pill {cls}">{label}</span>'
 st.markdown(phase_html + "</div>", unsafe_allow_html=True)
 
-# --- PHASE 0: Upload ---
+# --- Upload ---
 st.markdown("### 📄 Nahraj technický dokument")
-uploaded = st.file_uploader("PDF patent, výzkumná zpráva, prezentace technologie", type=["pdf"])
-
+uploaded = st.file_uploader("PDF patent, výzkumná zpráva, prezentace", type=["pdf"])
 if uploaded and not st.session_state.pdf_text:
-    with st.spinner("Extrahuji text z PDF..."):
+    with st.spinner("Extrahuji text..."): 
         text = extract_pdf_text(uploaded)
-        if text:
-            st.session_state.pdf_text = text
-            st.session_state.pdf_name = uploaded.name
-            st.session_state.phase = 1
-            st.rerun()
-        else:
-            st.error("Nepodařilo se extrahovat text.")
-
+        if text: st.session_state.pdf_text = text; st.session_state.pdf_name = uploaded.name; st.session_state.phase = 1; st.rerun()
 if st.session_state.pdf_text:
     with st.expander("📋 Extrahovaný text", expanded=False):
-        st.text(st.session_state.pdf_text[:3000] + ("..." if len(st.session_state.pdf_text) > 3000 else ""))
+        st.text(st.session_state.pdf_text[:3000])
 
-# --- PHASE 1: Document analysis ---
+# --- Analyze doc ---
 if st.session_state.phase >= 1 and not st.session_state.search_queries:
-    st.markdown("---")
-    st.markdown("### 🧠 AI analýza dokumentu")
-    st.caption("Gemini vytvoří shrnutí, klíčová slova a 3 cílené vyhledávací dotazy")
-    if not gemini_key:
-        st.warning("Zadej Gemini API klíč v bočním panelu.")
+    st.markdown("---"); st.markdown("### 🧠 AI analýza dokumentu")
+    if not gemini_key: st.warning("Zadej Gemini API klíč.")
     elif st.button("🚀 Analyzovat dokument", type="primary"):
-        with st.spinner("Gemini analyzuje dokument... (při přetížení se automaticky zopakuje)"):
+        with st.spinner("Gemini analyzuje..."):
             try:
-                result = analyze_document(gemini_key, st.session_state.pdf_text)
-                st.session_state.tech_summary = result["summary"]
-                st.session_state.tech_keywords_en = result["keywords"]
-                st.session_state.search_queries = result["queries"]
-                st.session_state.phase = 2
-                st.rerun()
-            except Exception as e:
-                st.error(f"Chyba: {e}")
+                r = analyze_document(gemini_key, st.session_state.pdf_text)
+                st.session_state.tech_summary = r["summary"]; st.session_state.tech_keywords_en = r["keywords"]
+                st.session_state.search_queries = r["queries"]; st.session_state.phase = 2; st.rerun()
+            except Exception as e: st.error(str(e))
 
 if st.session_state.search_queries:
-    st.markdown("---")
-    st.markdown("### 🔍 Výsledek AI analýzy dokumentu")
-    if st.session_state.tech_summary:
-        st.info(f"**Shrnutí:** {st.session_state.tech_summary}")
-    if st.session_state.tech_keywords_en:
-        st.caption(f"**Klíčová slova (EN):** {st.session_state.tech_keywords_en}")
+    st.markdown("---"); st.markdown("### 🔍 Vyhledávací dotazy")
+    if st.session_state.tech_summary: st.info(f"**Shrnutí:** {st.session_state.tech_summary}")
+    if st.session_state.tech_keywords_en: st.caption(f"Klíčová slova: {st.session_state.tech_keywords_en}")
     updated = []
-    labels = ["🎯 Konkurence", "📱 Aplikace", "🧪 Materiál/Doména"]
     for i, q in enumerate(st.session_state.search_queries):
-        lbl = labels[i] if i < len(labels) else f"Dotaz {i+1}"
-        edited = st.text_input(lbl, value=q, key=f"q_{i}")
-        updated.append(edited)
+        lbl = ["🎯 Konkurence", "📱 Aplikace", "🧪 Materiál"][i] if i < 3 else f"Dotaz {i+1}"
+        updated.append(st.text_input(lbl, value=q, key=f"q_{i}"))
     st.session_state.search_queries = updated
 
-# --- PHASE 2+3: Search + Filter ---
+# --- Search + Filter ---
 if st.session_state.phase >= 2 and st.session_state.search_queries and not st.session_state.patents_filtered:
     st.markdown("---")
-    can_search = bool(serpapi_key)
-    if not can_search:
-        st.warning("Zadej SerpApi Key v bočním panelu.")
-    if st.button("🔎 Spustit rešerši + AI filtr relevance", type="primary", disabled=not can_search):
-        all_patents = []; seen = set()
-        total_q = len(st.session_state.search_queries)
-        progress = st.progress(0, text="Spouštím rešerši...")
-
-        for qi, query in enumerate(st.session_state.search_queries):
-            progress.progress(int((qi / total_q) * 35), text=f"Dotaz {qi+1}/{total_q}: {query[:50]}...")
+    if not serpapi_key: st.warning("Zadej SerpApi Key.")
+    if st.button("🔎 Spustit rešerši + AI filtr", type="primary", disabled=not serpapi_key):
+        all_patents, seen = [], set()
+        progress = st.progress(0, text="Rešerše...")
+        for qi, q in enumerate(st.session_state.search_queries):
+            progress.progress(int((qi/len(st.session_state.search_queries))*35), text=f"Dotaz {qi+1}: {q[:40]}...")
             try:
-                results = search_google_patents(serpapi_key, query, max_patents_per_query)
-                for p in results:
-                    pid = p["pub_number"]
-                    if pid not in seen:
-                        seen.add(pid); p["source_query"] = query; all_patents.append(p)
-            except Exception as e:
-                st.warning(f"Dotaz {qi+1} selhal: {e}")
+                for p in search_google_patents(serpapi_key, q, max_patents_per_query):
+                    if p["pub_number"] not in seen: seen.add(p["pub_number"]); p["source_query"] = q; all_patents.append(p)
+            except Exception as e: st.warning(str(e))
             time.sleep(0.3)
-
         st.session_state.patents_raw = all_patents
-        progress.progress(40, text=f"{len(all_patents)} patentů nalezeno. AI filtr relevance...")
-
+        progress.progress(40, text=f"{len(all_patents)} patentů. AI filtr...")
         if gemini_key and all_patents:
             try:
-                filtered = filter_patents(gemini_key, all_patents, st.session_state.tech_summary, relevance_threshold)
-                st.session_state.patents_filtered = filtered
-                progress.progress(70, text=f"{len(filtered)} relevantních. Hledám publikace...")
-            except Exception as e:
-                st.warning(f"AI filtr: {e}")
-                st.session_state.patents_filtered = all_patents
-        else:
-            st.session_state.patents_filtered = all_patents
-
-        # OpenAlex — use English keywords
-        progress.progress(75, text="Hledám vědecké publikace (OpenAlex)...")
-        try:
-            openalex = search_openalex(st.session_state.tech_keywords_en, max_openalex)
-            st.session_state.openalex_results = openalex
-        except Exception as e:
-            st.warning(f"OpenAlex: {e}")
-
-        progress.progress(100, text="Hotovo!")
-        time.sleep(0.3); progress.empty()
+                st.session_state.patents_filtered = filter_patents(gemini_key, all_patents, st.session_state.tech_summary, relevance_threshold)
+            except: st.session_state.patents_filtered = all_patents
+        else: st.session_state.patents_filtered = all_patents
+        progress.progress(75, text="OpenAlex...")
+        try: st.session_state.openalex_results = search_openalex(st.session_state.tech_keywords_en, max_openalex)
+        except: pass
+        progress.progress(100, text="Hotovo!"); time.sleep(0.3); progress.empty()
         st.session_state.phase = 4; st.rerun()
 
-# --- Display results ---
+# --- Results + Stats ---
 if st.session_state.patents_raw:
-    st.markdown("---")
-    st.markdown("### 📊 Výsledky rešerše")
-
-    raw_c = len(st.session_state.patents_raw)
-    filt_c = len(st.session_state.patents_filtered)
-    competitors = [p for p in st.session_state.patents_filtered if "KOMPET" in p.get("rel_type", "").upper() or "COMPETITOR" in p.get("rel_type", "").upper()]
+    st.markdown("---"); st.markdown("### 📊 Výsledky rešerše")
+    stats = compute_stats(st.session_state.patents_filtered)
+    raw_c = len(st.session_state.patents_raw); filt_c = len(st.session_state.patents_filtered)
+    competitors = [p for p in st.session_state.patents_filtered if "COMPET" in p.get("rel_type","").upper() or "KONKUR" in p.get("rel_type","").upper()]
     commercial = [r for r in st.session_state.openalex_results if r["is_commercial"]]
-    unique_app = list(set(p["applicant"] for p in st.session_state.patents_filtered if p["applicant"] != "—"))
 
     st.markdown(f"""<div class="stat-row">
-        <div class="stat-box"><div class="num">{raw_c} → {filt_c}</div><div class="label">Patentů (před/po filtraci)</div></div>
-        <div class="stat-box"><div class="num">{len(competitors)}</div><div class="label">Konkurentů</div></div>
+        <div class="stat-box"><div class="num">{raw_c} → {filt_c}</div><div class="label">Patentů</div></div>
+        <div class="stat-box"><div class="num">{len(stats['assignees'])}</div><div class="label">Firem</div></div>
         <div class="stat-box"><div class="num">{len(st.session_state.openalex_results)}</div><div class="label">Publikací</div></div>
-        <div class="stat-box"><div class="num">{len(commercial)}</div><div class="label">Komerční spolupráce</div></div>
+        <div class="stat-box"><div class="num">{len(commercial)}</div><div class="label">Komerční</div></div>
     </div>""", unsafe_allow_html=True)
 
-    tab1, tab2, tab3 = st.tabs(["✅ Relevantní patenty", "📋 Všechny patenty (nefiltrované)", "📚 Publikace (OpenAlex)"])
+    tab1, tab2, tab3, tab4 = st.tabs(["✅ Relevantní patenty", "📋 Všechny patenty", "📚 Publikace", "📈 Statistiky"])
 
     with tab1:
-        if not st.session_state.patents_filtered:
-            st.info("Žádné patenty neprošly filtrem relevance. Zkus snížit práh v bočním panelu.")
-        for pat in st.session_state.patents_filtered:
-            render_patent_card(pat, show_relevance=True)
-
+        for pat in st.session_state.patents_filtered: render_patent_card(pat)
     with tab2:
-        st.caption(f"Všech {raw_c} patentů ze všech dotazů — včetně vyřazených filtrem")
-        for pat in st.session_state.patents_raw:
-            render_patent_card(pat, show_relevance=True)
-
+        st.caption(f"Všech {raw_c} patentů")
+        for pat in st.session_state.patents_raw: render_patent_card(pat)
     with tab3:
-        if not st.session_state.openalex_results:
-            st.info("Žádné publikace nenalezeny.")
         for pub in st.session_state.openalex_results:
             badge = "🏢 " if pub["is_commercial"] else ""
-            insts = ", ".join(pub["institutions"][:3]) if pub["institutions"] else "—"
-            st.markdown(f"""<div class="patent-card">
-                <h4>{badge}{pub['title']}</h4>
-                <div class="meta"><strong>Rok:</strong> {pub['year']} · <strong>Citováno:</strong> {pub['cited_by']}× · <strong>Typ:</strong> {pub['type']}</div>
-                <div class="meta" style="margin-top:4px;"><strong>Instituce:</strong> {insts}</div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="patent-card"><h4>{badge}{pub['title']}</h4>
+                <div class="meta">Rok: {pub['year']} · Citací: {pub['cited_by']}× · Instituce: {', '.join(pub['institutions'][:3])}</div></div>""", unsafe_allow_html=True)
+    with tab4:
+        st.markdown("#### Top přihlašovatelé patentů")
+        if stats["assignees"]:
+            import pandas as pd
+            df_a = pd.DataFrame(stats["assignees"], columns=["Firma/Instituce", "Počet patentů"])
+            st.dataframe(df_a, use_container_width=True, hide_index=True)
+        st.markdown("#### Patentová aktivita po letech")
+        if stats["yearly"]:
+            df_y = pd.DataFrame(stats["yearly"], columns=["Rok", "Počet"])
+            df_y = df_y[df_y["Počet"] > 0]
+            st.bar_chart(df_y.set_index("Rok"), use_container_width=True)
+        if stats["countries"]:
+            st.markdown("#### Geografické rozložení")
+            df_c = pd.DataFrame(stats["countries"], columns=["Stát", "Počet"])
+            st.dataframe(df_c, use_container_width=True, hide_index=True)
 
-# --- PHASE 4: Analysis ---
+# --- Analysis ---
 if st.session_state.phase >= 4 and st.session_state.patents_filtered and not st.session_state.analysis:
-    st.markdown("---")
-    st.markdown("### 🤖 Kritická AI analýza komerčního potenciálu")
-    if not gemini_key:
-        st.warning("Zadej Gemini API klíč.")
-    elif st.button("🧪 Spustit kritickou analýzu", type="primary"):
-        with st.spinner("Gemini provádí kritickou analýzu... (automatický retry při přetížení)"):
+    st.markdown("---"); st.markdown("### 🤖 Kritická AI analýza")
+    if not gemini_key: st.warning("Zadej Gemini API klíč.")
+    elif st.button("🧪 Spustit analýzu", type="primary"):
+        with st.spinner("Gemini analyzuje..."):
             try:
-                analysis = run_analysis(gemini_key, st.session_state.tech_summary, st.session_state.patents_filtered, st.session_state.openalex_results, st.session_state.pdf_text)
-                st.session_state.analysis = analysis
-                st.session_state.phase = 5
-
-                # Auto-save to history
-                save_to_history({
-                    "timestamp": datetime.now().strftime("%d.%m.%Y %H:%M"),
-                    "pdf_name": st.session_state.pdf_name,
-                    "tech_summary": st.session_state.tech_summary,
-                    "tech_keywords_en": st.session_state.tech_keywords_en,
-                    "search_queries": st.session_state.search_queries,
+                stats = compute_stats(st.session_state.patents_filtered)
+                analysis = run_analysis(gemini_key, st.session_state.tech_summary, st.session_state.patents_filtered, st.session_state.openalex_results, st.session_state.pdf_text, stats)
+                st.session_state.analysis = analysis; st.session_state.phase = 5
+                save_to_history({"timestamp": datetime.now().strftime("%d.%m.%Y %H:%M"), "pdf_name": st.session_state.pdf_name,
+                    "tech_summary": st.session_state.tech_summary, "search_queries": st.session_state.search_queries,
                     "patents_raw_count": len(st.session_state.patents_raw),
-                    "patents_filtered": [{"title": p["title"], "applicant": p["applicant"], "pub_number": p["pub_number"], "relevance": p["relevance"], "rel_type": p["rel_type"], "rel_reason": p["rel_reason"]} for p in st.session_state.patents_filtered],
-                    "openalex_results": [{"title": p["title"], "year": p["year"], "cited_by": p["cited_by"], "is_commercial": p["is_commercial"], "institutions": p["institutions"]} for p in st.session_state.openalex_results],
-                    "analysis": analysis,
-                })
-
+                    "patents_filtered": [{"title":p["title"],"applicant":p["applicant"],"pub_number":p["pub_number"],"relevance":p["relevance"],"rel_type":p["rel_type"]} for p in st.session_state.patents_filtered],
+                    "openalex_results": [{"title":p["title"],"year":p["year"],"cited_by":p["cited_by"],"is_commercial":p["is_commercial"],"institutions":p["institutions"]} for p in st.session_state.openalex_results],
+                    "analysis": analysis})
                 st.rerun()
-            except Exception as e:
-                st.error(f"Chyba: {e}")
+            except Exception as e: st.error(str(e))
 
 if st.session_state.analysis:
-    st.markdown("---")
-    st.markdown("### 🤖 Výsledek kritické AI analýzy")
+    st.markdown("---"); st.markdown("### 🤖 Výsledek analýzy")
     st.markdown(f'<div class="analysis-box">{st.session_state.analysis}</div>', unsafe_allow_html=True)
 
-# --- PHASE 5: Export ---
+# --- Export ---
 if st.session_state.phase >= 5 and st.session_state.analysis:
-    st.markdown("---")
-    st.markdown("### 📥 Export zprávy")
-    col1, col2 = st.columns(2)
+    st.markdown("---"); st.markdown("### 📥 Export")
+    col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("📄 Vygenerovat Word dokument", type="primary"):
+        if st.button("📄 Word report", type="primary"):
             with st.spinner("Generuji .docx..."):
                 try:
-                    buf = generate_docx(
-                        st.session_state.tech_summary, st.session_state.search_queries,
+                    stats = compute_stats(st.session_state.patents_filtered)
+                    buf = generate_docx(st.session_state.tech_summary, st.session_state.search_queries,
                         len(st.session_state.patents_raw), st.session_state.patents_filtered,
                         st.session_state.openalex_results, st.session_state.analysis,
-                        st.session_state.pdf_name, relevance_threshold,
-                    )
-                    st.session_state.doc_content = buf.getvalue()
-                    st.success("Dokument vygenerován!")
-                except Exception as e:
-                    st.error(f"Chyba: {e}")
+                        st.session_state.pdf_name, relevance_threshold, stats)
+                    st.session_state.doc_content = buf.getvalue(); st.success("Hotovo!")
+                except Exception as e: st.error(str(e))
+    with col2:
+        if st.button("📊 Excel tabulka", type="primary"):
+            with st.spinner("Generuji .xlsx..."):
+                try:
+                    buf = generate_xlsx(st.session_state.patents_filtered, st.session_state.openalex_results, st.session_state.tech_summary)
+                    st.session_state.xlsx_content = buf.getvalue(); st.success("Hotovo!")
+                except Exception as e: st.error(str(e))
+    with col3:
+        pass
+    dl1, dl2, dl3 = st.columns(3)
     if st.session_state.doc_content:
-        with col2:
-            st.download_button("⬇️ Stáhnout .docx", data=st.session_state.doc_content,
-                file_name=f"reserse_{datetime.now().strftime('%Y%m%d_%H%M')}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        with dl1: st.download_button("⬇️ Stáhnout .docx", data=st.session_state.doc_content,
+            file_name=f"reserse_{datetime.now().strftime('%Y%m%d_%H%M')}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    if st.session_state.xlsx_content:
+        with dl2: st.download_button("⬇️ Stáhnout .xlsx", data=st.session_state.xlsx_content,
+            file_name=f"patenty_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 if st.session_state.phase > 0:
     st.markdown("---")
