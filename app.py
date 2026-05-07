@@ -676,21 +676,39 @@ if st.session_state.phase >= 2 and st.session_state.search_queries and not st.se
         for qi, q in enumerate(st.session_state.search_queries):
             progress.progress(int((qi/len(st.session_state.search_queries))*35), text=f"Dotaz {qi+1}: {q[:40]}...")
             try:
-                for p in search_google_patents(serpapi_key, q, max_patents_per_query):
+                results = search_google_patents(serpapi_key, q, max_patents_per_query)
+                st.toast(f"Dotaz {qi+1}: nalezeno {len(results)} patentů")
+                for p in results:
                     if p["pub_number"] not in seen: seen.add(p["pub_number"]); p["source_query"] = q; all_patents.append(p)
-            except Exception as e: st.warning(str(e))
+            except Exception as e:
+                st.error(f"Dotaz {qi+1} selhal: {e}")
             time.sleep(0.3)
+
         st.session_state.patents_raw = all_patents
+
+        if not all_patents:
+            st.error("Nebyly nalezeny žádné patenty. Zkontroluj SerpApi klíč a dotazy.")
+            progress.empty()
+            st.stop()
+
         progress.progress(40, text=f"{len(all_patents)} patentů. AI filtr...")
         if gemini_key and all_patents:
             try:
                 st.session_state.patents_filtered = filter_patents(gemini_key, all_patents, st.session_state.tech_summary, relevance_threshold)
-            except: st.session_state.patents_filtered = all_patents
-        else: st.session_state.patents_filtered = all_patents
+            except Exception as e:
+                st.warning(f"AI filtr selhal ({e}), zobrazuji všechny patenty")
+                st.session_state.patents_filtered = all_patents
+        else:
+            st.session_state.patents_filtered = all_patents
+
         progress.progress(75, text="OpenAlex...")
-        try: st.session_state.openalex_results = search_openalex(st.session_state.tech_keywords_en, max_openalex)
-        except: pass
-        progress.progress(100, text="Hotovo!"); time.sleep(0.3); progress.empty()
+        try:
+            st.session_state.openalex_results = search_openalex(st.session_state.tech_keywords_en, max_openalex)
+        except Exception as e:
+            st.warning(f"OpenAlex selhal: {e}")
+
+        progress.progress(100, text="Hotovo!")
+        time.sleep(0.3); progress.empty()
         st.session_state.phase = 4; st.rerun()
 
 # --- Results + Stats ---
