@@ -70,7 +70,7 @@ html, body, [class*="st-"] { font-family: 'Instrument Sans', -apple-system, Blin
 # ---------------------------------------------------------------------------
 defaults = {
     "phase": 0, "pdf_text": "", "pdf_name": "",
-    "tech_summary": "", "tech_keywords_en": "",
+    "tech_summary": "", "tech_keywords_en": "", "tech_domains": "",
     "search_queries": [],
     "patents_raw": [], "patents_filtered": [],
     "openalex_results": [], "analysis": "", "doc_content": "", "xlsx_content": "",
@@ -184,30 +184,46 @@ def compute_stats(patents):
 # ---------------------------------------------------------------------------
 def analyze_document(api_key, doc_text):
     system = """You are an expert in patent research and technology transfer.
+
 TASK: Based on the technical document, generate:
 1. A concise technology summary in Czech (2-3 sentences)
-2. 5-8 English keywords/keyphrases for searching scientific databases
-3. THREE different Google Patents search queries:
-   - QUERY 1 (COMPETITORS): Same/similar technology/method
-   - QUERY 2 (APPLICATIONS): Products that could use this technology
-   - QUERY 3 (MATERIAL/DOMAIN): Same material in other contexts
-OUTPUT FORMAT:
+2. A LIST of ALL potential application domains mentioned or implied in the document (in English)
+3. 5-8 English keywords/keyphrases for searching scientific databases
+4. FIVE different Google Patents search queries — each targeting a DIFFERENT application domain or angle:
+   - QUERY 1 (CORE TECHNOLOGY): The exact technology/method/synthesis described
+   - QUERY 2 (APPLICATION 1): First application domain (e.g. electronics, sensors)
+   - QUERY 3 (APPLICATION 2): Second application domain (e.g. biomedicine, coatings)
+   - QUERY 4 (APPLICATION 3): Third application domain (e.g. energy, catalysis, optics)
+   - QUERY 5 (MATERIAL): The base material in broader contexts
+
+CRITICAL RULES:
+- You MUST cover ALL application areas mentioned in the document, not just one
+- If the document mentions electronics, sensors, biomedicine, shielding, catalysis — generate queries for ALL of them
+- Do NOT focus on just one property or application
+- Each query max 2-3 phrases with AND/OR, in quotes, English
+- NO markdown, NO explanations
+
+OUTPUT FORMAT (follow exactly):
 SUMMARY: [Czech summary]
+DOMAINS: [comma-separated list of application domains in English]
 KEYWORDS: [comma-separated English keywords]
-QUERY1: [query]
-QUERY2: [query]
-QUERY3: [query]
-RULES: Each query max 2-3 phrases with AND/OR. Quotes. English. NO markdown."""
-    result = call_gemini(api_key, f"Analyze:\n\n{doc_text[:8000]}", system)
-    summary, keywords, queries = "", "", []
+QUERY1: [core technology query]
+QUERY2: [application 1 query]
+QUERY3: [application 2 query]
+QUERY4: [application 3 query]
+QUERY5: [material query]"""
+    result = call_gemini(api_key, f"Analyze this document thoroughly — identify ALL applications and domains:\n\n{doc_text[:8000]}", system)
+    summary, keywords, domains, queries = "", "", "", []
     for line in result.strip().split("\n"):
         line = line.strip()
         if line.startswith("SUMMARY:"): summary = line[8:].strip()
         elif line.startswith("KEYWORDS:"): keywords = line[9:].strip()
+        elif line.startswith("DOMAINS:"): domains = line[8:].strip()
         elif line.startswith("QUERY"):
             q = line.split(":", 1)[-1].strip().strip("`\"'")
-            if q: queries.append(q)
-    return {"summary": summary or "—", "keywords": keywords or "—", "queries": queries or [result.strip()]}
+            q = re.sub(r"^```.*\n?", "", q); q = re.sub(r"\n?```$", "", q)
+            if q: queries.append(q.strip())
+    return {"summary": summary or "—", "keywords": keywords or "—", "domains": domains or "—", "queries": queries or [result.strip()]}
 
 # ---------------------------------------------------------------------------
 # STEP 2: SEARCH GOOGLE PATENTS
@@ -565,8 +581,20 @@ def generate_docx(tech_summary, queries, patents_raw_count, patents, openalex, a
             doc.add_paragraph(line)
 
     doc.add_page_break()
-    doc.add_heading("Metodologie", level=1)
-    doc.add_paragraph(f"AI Transfer System V5.0 | Patenty: Google Patents (SerpApi) | Publikace: OpenAlex | AI: Gemini | Filtr relevance: práh {threshold}/10 | Výsledky vyžadují odbornou revizi TTO")
+    doc.add_heading("Metodologie a nastavení", level=1)
+    doc.add_paragraph(f"Systém: AI Transfer System V5.0")
+    doc.add_paragraph(f"Datum: {datetime.now().strftime('%d. %m. %Y %H:%M')}")
+    doc.add_paragraph(f"Zdrojový dokument: {pdf_filename}")
+    doc.add_paragraph(f"Patentová databáze: Google Patents (via SerpApi)")
+    doc.add_paragraph(f"Vědecké publikace: OpenAlex")
+    doc.add_paragraph(f"AI model: Google Gemini (2.5 Flash / 2.5 Flash-Lite / 1.5 Flash fallback)")
+    doc.add_paragraph(f"Práh relevance: {threshold}/10")
+    doc.add_paragraph(f"Počet patentů na dotaz: max {len(patents)} (po filtraci z {patents_raw_count})")
+    doc.add_paragraph(f"Použité vyhledávací dotazy:")
+    for i, q in enumerate(queries, 1):
+        p = doc.add_paragraph(f"  Dotaz {i}: {q}")
+    doc.add_paragraph("")
+    doc.add_paragraph("Výsledky vyžadují odbornou validaci pracovníkem TTO. AI analýza může obsahovat nepřesnosti.")
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     return buf
@@ -653,16 +681,20 @@ if st.session_state.phase >= 1 and not st.session_state.search_queries:
             try:
                 r = analyze_document(gemini_key, st.session_state.pdf_text)
                 st.session_state.tech_summary = r["summary"]; st.session_state.tech_keywords_en = r["keywords"]
-                st.session_state.search_queries = r["queries"]; st.session_state.phase = 2; st.rerun()
+                st.session_state.search_queries = r["queries"]
+                if "domains" in r: st.session_state["tech_domains"] = r["domains"]
+                st.session_state.phase = 2; st.rerun()
             except Exception as e: st.error(str(e))
 
 if st.session_state.search_queries:
     st.markdown("---"); st.markdown("### 🔍 Vyhledávací dotazy")
     if st.session_state.tech_summary: st.info(f"**Shrnutí:** {st.session_state.tech_summary}")
-    if st.session_state.tech_keywords_en: st.caption(f"Klíčová slova: {st.session_state.tech_keywords_en}")
+    if st.session_state.get("tech_domains"): st.caption(f"**Identifikované aplikační domény:** {st.session_state.tech_domains}")
+    if st.session_state.tech_keywords_en: st.caption(f"**Klíčová slova (EN):** {st.session_state.tech_keywords_en}")
     updated = []
+    labels = ["🎯 Jádro technologie", "📱 Aplikace 1", "🏥 Aplikace 2", "⚡ Aplikace 3", "🧪 Materiál"]
     for i, q in enumerate(st.session_state.search_queries):
-        lbl = ["🎯 Konkurence", "📱 Aplikace", "🧪 Materiál"][i] if i < 3 else f"Dotaz {i+1}"
+        lbl = labels[i] if i < len(labels) else f"Dotaz {i+1}"
         updated.append(st.text_input(lbl, value=q, key=f"q_{i}"))
     st.session_state.search_queries = updated
 
