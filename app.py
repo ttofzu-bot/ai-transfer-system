@@ -1,9 +1,9 @@
 """
-AI Transfer System V6.0 — FZÚ Patent & Research Intelligence
+AI Transfer System V6.1 — FZÚ Patent & Research Intelligence
 =============================================================
 Game-changer edition:
 - Prompt sets from prompt_sets/*.toml
-- FZÚ-inspired premium UX/UI
+- Clean FZÚ-inspired UX/UI
 - Patent jurisdictions + estimated patent families
 - Commercial Readiness Score / decision engine
 - Evidence-based GO / CONDITIONAL GO / NO-GO
@@ -246,7 +246,7 @@ def get_secret_or_env(name, default=""):
 
 
 # ---------------------------------------------------------------------------
-# FZÚ-INSPIRED CSS / UI
+# CLEAN FZÚ-INSPIRED CSS / UI — V6.1
 # ---------------------------------------------------------------------------
 st.markdown(
     """
@@ -254,168 +254,251 @@ st.markdown(
 @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --fzu-bg: #f4f7fb;
-  --fzu-navy: #071122;
-  --fzu-ink: #0f172a;
-  --fzu-muted: #64748b;
-  --fzu-border: #dce5ef;
-  --fzu-card: #ffffff;
-  --fzu-blue: #1177ff;
-  --fzu-cyan: #00b7ff;
-  --fzu-green: #25d366;
-  --fzu-red: #ff3b53;
-  --fzu-yellow: #f6c343;
+  --bg: #f6f8fb;
+  --panel: #ffffff;
+  --ink: #101828;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --navy: #071122;
+  --blue: #1455d9;
+  --cyan: #00a3ff;
+  --green: #17b26a;
+  --red: #f04438;
+  --yellow: #f79009;
+  --shadow: 0 14px 36px rgba(16, 24, 40, 0.07);
 }
 
 html, body, [class*="st-"] {
   font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
-body { background: var(--fzu-bg); }
-.block-container { max-width: 1240px; padding: 2rem 1.5rem 4rem; }
+html, body, .stApp { background: var(--bg) !important; color: var(--ink); }
+.block-container { max-width: 1180px; padding: 1.5rem 1.4rem 4rem; }
 #MainMenu, footer { visibility: hidden; }
 
+/* Sidebar: čisté, ne sci-fi */
 [data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #071122 0%, #0d1b33 54%, #091322 100%) !important;
-  border-right: 1px solid rgba(255,255,255,0.06) !important;
+  background: #ffffff !important;
+  border-right: 1px solid var(--line) !important;
 }
-[data-testid="stSidebar"] * { color: #e5eefb !important; }
-[data-testid="stSidebar"] .stTextInput input, [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
-  background: rgba(255,255,255,0.08) !important;
-  border: 1px solid rgba(255,255,255,0.14) !important;
+[data-testid="stSidebar"] * { color: var(--ink) !important; }
+[data-testid="stSidebar"] h3 {
+  font-size: .78rem !important;
+  letter-spacing: .06em !important;
+  text-transform: uppercase !important;
+  color: #344054 !important;
+  margin-top: .6rem !important;
+}
+[data-testid="stSidebar"] .stCaption, [data-testid="stSidebar"] small, [data-testid="stSidebar"] p {
+  color: var(--muted) !important;
+}
+[data-testid="stSidebar"] .stTextInput input,
+[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
+  background: #ffffff !important;
+  border: 1px solid #d0d5dd !important;
   border-radius: 12px !important;
-  color: #fff !important;
+  color: var(--ink) !important;
+  box-shadow: none !important;
 }
 [data-testid="stSidebar"] button {
-  background: rgba(255,255,255,0.08) !important;
-  border: 1px solid rgba(255,255,255,0.16) !important;
+  background: #ffffff !important;
+  border: 1px solid #d0d5dd !important;
   border-radius: 12px !important;
-  width: 100%;
+  color: var(--ink) !important;
   font-weight: 700 !important;
 }
 [data-testid="stSidebar"] button:hover {
-  background: rgba(17,119,255,0.28) !important;
-  border-color: rgba(0,183,255,0.65) !important;
+  border-color: var(--blue) !important;
+  background: #f5f8ff !important;
 }
 
+/* Main hero */
 .hero {
-  background:
-    radial-gradient(circle at 12% 12%, rgba(17,119,255,0.45), transparent 30%),
-    radial-gradient(circle at 72% 28%, rgba(37,211,102,0.28), transparent 28%),
-    radial-gradient(circle at 86% 78%, rgba(255,59,83,0.30), transparent 26%),
-    linear-gradient(135deg, #06101f 0%, #0b1b35 56%, #071122 100%);
-  color: white;
-  padding: 2.6rem 2.8rem;
-  border-radius: 28px;
-  margin-bottom: 1.5rem;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 1.55rem 1.65rem;
+  border-radius: 22px;
+  margin-bottom: 1rem;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.10);
-  box-shadow: 0 22px 60px rgba(7,17,34,0.22);
+}
+.hero:before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 6px;
+  background: linear-gradient(180deg, var(--blue), var(--cyan), var(--green));
 }
 .hero-grid {
   display: grid;
-  grid-template-columns: 1.4fr 0.85fr;
-  gap: 28px;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 22px;
   align-items: center;
 }
 .hero-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255,255,255,0.08);
-  color: #dbeafe;
-  padding: 6px 14px;
+  color: #175cd3;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 5px 11px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: .72rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: .05em;
   text-transform: uppercase;
-  margin-bottom: 1rem;
-  border: 1px solid rgba(255,255,255,0.14);
+  margin-bottom: .8rem;
 }
 .hero h1 {
-  font-size: clamp(2rem, 4vw, 4rem);
-  line-height: 0.94;
+  font-size: clamp(2rem, 3vw, 3rem);
+  line-height: 1;
   font-weight: 800;
-  margin: 0 0 1rem;
-  letter-spacing: -0.06em;
+  margin: 0 0 .65rem;
+  letter-spacing: -.055em;
+  color: var(--navy);
 }
-.hero p { font-size: 1rem; opacity: 0.72; margin: 0; max-width: 760px; }
-.hero-org { font-size: 0.8rem; opacity: 0.50; margin-top: 1.2rem; font-weight: 700; }
-.hero-chip-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 1.25rem; }
-.hero-chip { padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); font-size: 0.72rem; font-weight: 700; color: #eaf3ff; }
+.hero p {
+  font-size: .98rem;
+  line-height: 1.55;
+  color: #475467;
+  margin: 0;
+  max-width: 760px;
+}
+.hero-org {
+  font-size: .78rem;
+  color: #667085;
+  margin-top: .9rem;
+  font-weight: 700;
+}
+.hero-chip-row { display: flex; gap: 7px; flex-wrap: wrap; margin-top: .9rem; }
+.hero-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  font-size: .72rem;
+  font-weight: 700;
+  color: #344054;
+}
 .hero-panel {
-  background: rgba(255,255,255,0.07);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 22px;
-  padding: 1.25rem;
-  backdrop-filter: blur(8px);
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 18px;
+  padding: 1.05rem;
 }
-.hero-panel .big { font-size: 2.3rem; font-weight: 800; letter-spacing: -0.04em; }
-.hero-panel .small { font-size: .78rem; opacity: .68; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.hero-panel .big { font-size: 2rem; font-weight: 800; letter-spacing: -.045em; color: var(--navy); }
+.hero-panel .small { font-size: .72rem; color: #667085; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
 
-.phase-bar { display: flex; gap: 6px; margin: 1.2rem 0 1.8rem; flex-wrap: wrap; }
-.phase-pill { padding: 8px 15px; border-radius: 999px; font-size: 0.73rem; font-weight: 800; border: 1px solid transparent; }
-.phase-active { background: #071122; color: #fff; border-color: rgba(17,119,255,0.35); box-shadow: 0 8px 24px rgba(17,119,255,0.18); }
-.phase-done { background: #e9fbf0; color: #057033; border-color: #b6f0cb; }
-.phase-pending { background: #fff; color: #94a3b8; border-color: #e2e8f0; }
-
-.fzu-card {
-  background: rgba(255,255,255,0.92);
-  border: 1px solid var(--fzu-border);
-  border-radius: 22px;
-  padding: 1.2rem 1.35rem;
-  box-shadow: 0 12px 36px rgba(15,23,42,0.06);
+/* Phase navigation */
+.phase-bar { display: flex; gap: 8px; margin: .85rem 0 1.35rem; flex-wrap: wrap; }
+.phase-pill {
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: .73rem;
+  font-weight: 800;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: #667085;
 }
-.metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 1.2rem 0; }
-.metric-card { background: #fff; border: 1px solid #e4edf7; border-radius: 20px; padding: 1.05rem; box-shadow: 0 10px 32px rgba(15,23,42,0.055); }
-.metric-card .num { font-size: 1.65rem; font-weight: 800; color: #071122; letter-spacing: -0.045em; }
-.metric-card .label { font-size: 0.68rem; color: #64748b; margin-top: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; }
+.phase-active { background: var(--navy); color: #fff; border-color: var(--navy); }
+.phase-done { background: #ecfdf3; color: #067647; border-color: #abefc6; }
+.phase-pending { background: #fff; color: #98a2b3; }
 
-.score-grid { display: grid; grid-template-columns: 0.72fr 1.28fr; gap: 18px; margin: 1rem 0 1.5rem; }
+/* Cards */
+.fzu-card, [data-testid="stVerticalBlockBorderWrapper"] {
+  border-radius: 18px !important;
+}
+.metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 1rem 0; }
+.metric-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: .9rem 1rem;
+  box-shadow: 0 8px 24px rgba(16,24,40,.045);
+}
+.metric-card .num { font-size: 1.45rem; font-weight: 800; color: var(--navy); letter-spacing: -.04em; }
+.metric-card .label { font-size: .66rem; color: var(--muted); margin-top: 2px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
+
+/* Scorecard */
+.score-grid { display: grid; grid-template-columns: .72fr 1.28fr; gap: 14px; margin: 1rem 0 1.25rem; }
 .score-ring {
-  min-height: 260px;
-  border-radius: 28px;
-  background: radial-gradient(circle at 30% 20%, rgba(0,183,255,0.16), transparent 32%), linear-gradient(145deg, #071122, #0c1d38);
+  min-height: 230px;
+  border-radius: 20px;
+  background: var(--navy);
   color: #fff;
-  padding: 1.4rem;
+  padding: 1.15rem;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 20px 55px rgba(7,17,34,0.22);
+  box-shadow: 0 14px 34px rgba(7,17,34,.18);
 }
-.score-number { font-size: 4.5rem; font-weight: 800; line-height: 0.95; letter-spacing: -0.08em; }
-.score-verdict { display: inline-flex; width: fit-content; padding: 8px 13px; border-radius: 999px; font-size: .75rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.verdict-go { background: rgba(37,211,102,.16); color: #86efac; border: 1px solid rgba(37,211,102,.36); }
-.verdict-conditional { background: rgba(246,195,67,.16); color: #fde68a; border: 1px solid rgba(246,195,67,.36); }
-.verdict-no { background: rgba(255,59,83,.16); color: #fca5a5; border: 1px solid rgba(255,59,83,.36); }
-.score-table { background: #fff; border: 1px solid #e4edf7; border-radius: 28px; padding: 1.2rem; box-shadow: 0 12px 36px rgba(15,23,42,0.06); }
-.score-row { display: grid; grid-template-columns: 170px 1fr 44px; gap: 12px; align-items: center; margin: 9px 0; }
-.score-label { font-size: .78rem; color: #334155; font-weight: 800; }
-.score-track { height: 10px; background: #eaf0f7; border-radius: 999px; overflow: hidden; }
-.score-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--fzu-blue), var(--fzu-cyan), var(--fzu-green)); }
-.score-val { font-family: 'JetBrains Mono'; font-size: .76rem; color: #0f172a; font-weight: 800; text-align: right; }
+.score-number { font-size: 4rem; font-weight: 800; line-height: .95; letter-spacing: -.075em; }
+.score-verdict { display: inline-flex; width: fit-content; padding: 7px 11px; border-radius: 999px; font-size: .72rem; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; }
+.verdict-go { background: rgba(23,178,106,.16); color: #86efac; border: 1px solid rgba(23,178,106,.36); }
+.verdict-conditional { background: rgba(247,144,9,.16); color: #fedf89; border: 1px solid rgba(247,144,9,.36); }
+.verdict-no { background: rgba(240,68,56,.16); color: #fda29b; border: 1px solid rgba(240,68,56,.36); }
+.score-table { background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 1rem; box-shadow: 0 8px 24px rgba(16,24,40,.045); }
+.score-row { display: grid; grid-template-columns: 170px 1fr 42px; gap: 12px; align-items: center; margin: 8px 0; }
+.score-label { font-size: .78rem; color: #344054; font-weight: 800; }
+.score-track { height: 8px; background: #eef2f6; border-radius: 999px; overflow: hidden; }
+.score-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--blue), var(--cyan), var(--green)); }
+.score-val { font-family: 'JetBrains Mono'; font-size: .74rem; color: var(--navy); font-weight: 800; text-align: right; }
 
-.patent-card { border: 1px solid #e4edf7; border-radius: 18px; padding: 1.15rem 1.25rem; margin-bottom: 10px; background: #fff; box-shadow: 0 7px 24px rgba(15,23,42,0.045); }
-.patent-card:hover { border-color: #93c5fd; box-shadow: 0 14px 34px rgba(17,119,255,0.08); }
-.patent-card h4 { font-size: 0.93rem; font-weight: 800; margin: 0 0 0.45rem; color: #071122; }
-.patent-card .meta { font-size: 0.78rem; color: #64748b; line-height: 1.65; }
-.patent-card .applicant { display: inline-block; background: #eef6ff; color: #0b5cd7; padding: 4px 10px; border-radius: 999px; font-size: 0.7rem; font-weight: 800; margin-top: 0.55rem; margin-right: 4px; }
-.relevance { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 0.7rem; font-weight: 900; margin-top: 0.55rem; }
-.rel-high { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
-.rel-med { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
-.rel-low { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
-.analysis-box { background: #fff; border: 1px solid #e2e8f0; border-left: 5px solid #1177ff; border-radius: 0 22px 22px 0; padding: 2rem; margin: 1rem 0; font-size: 0.9rem; line-height: 1.8; white-space: pre-wrap; box-shadow: 0 12px 36px rgba(15,23,42,0.06); }
+/* Data cards */
+.patent-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 10px;
+  background: #fff;
+  box-shadow: 0 7px 20px rgba(16,24,40,.04);
+}
+.patent-card:hover { border-color: #93c5fd; box-shadow: 0 10px 26px rgba(20,85,217,.075); }
+.patent-card h4 { font-size: .93rem; font-weight: 800; margin: 0 0 .4rem; color: var(--navy); }
+.patent-card .meta { font-size: .78rem; color: #667085; line-height: 1.65; }
+.patent-card .applicant { display: inline-block; background: #eff6ff; color: #175cd3; padding: 4px 10px; border-radius: 999px; font-size: .7rem; font-weight: 800; margin-top: .55rem; margin-right: 4px; }
+.relevance { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: .7rem; font-weight: 900; margin-top: .55rem; }
+.rel-high { background: #ecfdf3; color: #067647; border: 1px solid #abefc6; }
+.rel-med { background: #fffaeb; color: #b54708; border: 1px solid #fedf89; }
+.rel-low { background: #fef3f2; color: #b42318; border: 1px solid #fecdca; }
+.analysis-box { background: #fff; border: 1px solid var(--line); border-left: 5px solid var(--blue); border-radius: 0 18px 18px 0; padding: 1.5rem; margin: 1rem 0; font-size: .9rem; line-height: 1.78; white-space: pre-wrap; box-shadow: 0 8px 24px rgba(16,24,40,.045); }
 
-.stButton > button[kind="primary"] { background: linear-gradient(135deg, #071122, #1177ff) !important; color: white !important; border: none !important; border-radius: 14px !important; font-weight: 800 !important; box-shadow: 0 12px 32px rgba(17,119,255,0.22); }
-.stTabs [aria-selected="true"] { background: #eef6ff !important; color: #0b5cd7 !important; border-radius: 12px !important; }
-[data-testid="stFileUploader"] { border: 2px dashed #cbd8e7 !important; border-radius: 20px !important; background: #fff !important; }
+/* Streamlit controls */
+.stButton > button[kind="primary"] {
+  background: var(--navy) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: 12px !important;
+  font-weight: 800 !important;
+  box-shadow: 0 8px 22px rgba(7,17,34,.15);
+}
+.stButton > button[kind="primary"]:hover { background: #12233f !important; }
+.stTabs [aria-selected="true"] { background: #eff6ff !important; color: #175cd3 !important; border-radius: 999px !important; }
+.stTabs [data-baseweb="tab-list"] { gap: 6px; }
+[data-testid="stFileUploader"] { background: transparent !important; }
+[data-testid="stFileUploaderDropzone"] {
+  background: #ffffff !important;
+  border: 1px dashed #b8c7d9 !important;
+  border-radius: 16px !important;
+  min-height: 90px !important;
+  padding: 1rem !important;
+}
+[data-testid="stFileUploaderDropzone"] button {
+  background: var(--navy) !important;
+  color: #ffffff !important;
+  border-radius: 10px !important;
+  border: none !important;
+  font-weight: 800 !important;
+}
+textarea, input { border-radius: 12px !important; }
 
 @media (max-width: 980px) {
   .hero-grid, .score-grid, .metric-grid { grid-template-columns: 1fr; }
   .score-row { grid-template-columns: 1fr; gap: 4px; }
+  .hero { padding: 1.25rem; }
 }
 </style>
 """,
@@ -513,7 +596,7 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.caption("AI Transfer System V6.0\nFZÚ AV ČR")
+    st.caption("AI Transfer System V6.1\nFZÚ AV ČR")
 
 
 # ---------------------------------------------------------------------------
@@ -1332,7 +1415,7 @@ def generate_docx(tech_summary, queries, patents_raw_count, patents, openalex, a
 
     doc.add_page_break()
     doc.add_heading("Metodologie a nastavení", level=1)
-    doc.add_paragraph("Systém: AI Transfer System V6.0")
+    doc.add_paragraph("Systém: AI Transfer System V6.1")
     doc.add_paragraph(f"Datum: {datetime.now().strftime('%d. %m. %Y %H:%M')}")
     doc.add_paragraph(f"Zdrojový dokument: {pdf_filename}")
     doc.add_paragraph(f"Prompt sada: {prompt_set}")
@@ -1429,21 +1512,20 @@ st.markdown(
 <div class="hero">
   <div class="hero-grid">
     <div>
-      <div class="hero-badge">🔬 Patent & Research Intelligence</div>
+      <div class="hero-badge">Patent & Research Intelligence</div>
       <h1>AI Transfer System</h1>
-      <p>Screening komerčního potenciálu technologií: patenty, publikace, patentové rodiny, geografické pokrytí a Commercial Readiness Score.</p>
+      <p>Screening komerčního potenciálu technologií pro TTO: patenty, publikace, patentové rodiny, geografické pokrytí a rozhodovací scorecard.</p>
       <div class="hero-chip-row">
         <span class="hero-chip">Patent families</span>
-        <span class="hero-chip">Decision engine</span>
-        <span class="hero-chip">Evidence-based report</span>
-        <span class="hero-chip">FZÚ TTO workflow</span>
+        <span class="hero-chip">Commercial score</span>
+        <span class="hero-chip">Evidence report</span>
       </div>
       <div class="hero-org">Fyzikální ústav AV ČR — Transfer znalostí a technologií</div>
     </div>
     <div class="hero-panel">
-      <div class="small">Current mode</div>
-      <div class="big">V6.0</div>
-      <div style="opacity:.72; font-size:.86rem; line-height:1.55; margin-top:.5rem;">Od rešerše k rozhodnutí: GO / CONDITIONAL GO / NO-GO s vysvětlením a dalšími kroky.</div>
+      <div class="small">Aktuální režim</div>
+      <div class="big">V6.1</div>
+      <div style="color:#667085; font-size:.86rem; line-height:1.55; margin-top:.35rem;">Rychlý přechod od rešerše k rozhodnutí: GO / CONDITIONAL GO / NO-GO.</div>
     </div>
   </div>
 </div>
@@ -1459,8 +1541,9 @@ for label, idx in phases:
 st.markdown(phase_html + "</div>", unsafe_allow_html=True)
 
 # Upload / manual input
-st.markdown("### 📄 Vstupní technologie")
-uploaded = st.file_uploader("Nahraj PDF patent, výzkumnou zprávu nebo prezentaci", type=["pdf"])
+st.markdown("### Vstupní technologie")
+st.caption("Nahraj PDF dokument, nebo níže vlož technický popis ručně.")
+uploaded = st.file_uploader("PDF dokument", type=["pdf"], label_visibility="collapsed")
 if uploaded and not st.session_state.pdf_text:
     with st.spinner("Extrahuji text..."):
         text = extract_pdf_text(uploaded)
