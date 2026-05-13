@@ -1,7 +1,7 @@
 """
-AI Transfer System V6.1 — FZÚ Patent & Research Intelligence
+AI Transfer System V6.3 — FZÚ Patent & Research Intelligence
 =============================================================
-Game-changer edition:
+Game-changer edition, conservative scorecard fix:
 - Prompt sets from prompt_sets/*.toml
 - Clean FZÚ-inspired UX/UI
 - Patent jurisdictions + estimated patent families
@@ -46,6 +46,7 @@ st.set_page_config(
 HISTORY_DIR = Path("analysis_history")
 HISTORY_DIR.mkdir(exist_ok=True)
 PROMPT_ROOT = Path("prompt_sets")
+SCORE_MODEL_VERSION = "v6.3-conservative-consistent"
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +116,7 @@ PATENTS:
 Write in Czech. Be realistic, evidence-based and commercially useful.
 Do not use markdown formatting. Do not use **, ##, *, or backticks.
 Do not invent partners or market evidence. If evidence is weak, say it clearly.
-Use the scorecard and evidence tables as decision support, not as absolute truth.
+Use the scorecard and evidence tables as decision support. The final verdict in section 6 MUST exactly match the scorecard verdict.
 Your goal is to help management decide whether to continue, pause, or redirect the technology transfer effort.""",
         "user": """TECHNOLOGIE:
 {{tech_summary}}
@@ -596,7 +597,7 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.caption("AI Transfer System V6.1\nFZÚ AV ČR")
+    st.caption("AI Transfer System V6.3\nFZÚ AV ČR")
 
 
 # ---------------------------------------------------------------------------
@@ -865,26 +866,49 @@ def compute_trend_score(yearly):
 
 
 def compute_decision_score(filtered_patents, raw_patents, openalex, stats):
+    """
+    Conservative decision engine for early TTO screening.
+
+    Important principle:
+    - Patent volume alone must NOT produce a GO.
+    - GO requires technical relevance + at least some market/partner evidence + manageable risk.
+    - Otherwise the right result is usually CONDITIONAL GO, even with many patents.
+    """
     patents_for_score = filtered_patents or raw_patents[:20]
     relevances = [int(p.get("relevance", 0) or 0) for p in patents_for_score]
-    avg_top_relevance = sum(sorted(relevances, reverse=True)[:10]) / max(len(sorted(relevances, reverse=True)[:10]), 1)
+    top_relevances = sorted(relevances, reverse=True)[:10]
+    avg_top_relevance = sum(top_relevances) / max(len(top_relevances), 1)
+    high_relevance_count = len([r for r in relevances if r >= 7])
 
     rel_types = stats.get("rel_types", Counter())
-    competitor_count = sum(v for k, v in rel_types.items() if "COMPET" in k or "SUBSTITUTE" in k)
-    partner_count = sum(v for k, v in rel_types.items() if "PARTNER" in k or "CUSTOMER" in k)
+    competitor_count = sum(v for k, v in rel_types.items() if "COMPET" in str(k).upper() or "SUBSTITUTE" in str(k).upper())
+    partner_count = sum(v for k, v in rel_types.items() if "PARTNER" in str(k).upper() or "CUSTOMER" in str(k).upper())
     commercial_pub_count = len([r for r in openalex if r.get("is_commercial")])
     unique_assignees = len(stats.get("assignees", []))
     families = stats.get("families", [])
     countries = stats.get("countries", [])
     multi_country_families = len([f for f in families if f.get("country_count", 0) >= 2])
 
-    technical_fit = clamp(avg_top_relevance)
-    market_pull = clamp(2.5 + partner_count * 0.8 + commercial_pub_count * 1.0 + min(len(openalex), 30) / 10)
-    patent_strength = clamp(math.log1p(len(raw_patents)) * 2.6 + compute_trend_score(stats.get("yearly", [])) * 0.35)
-    family_geo_strength = clamp(len(countries) * 1.15 + multi_country_families * 1.5 + min(len(families), 20) * 0.12)
-    partner_availability = clamp(unique_assignees * 0.45 + partner_count * 1.1 + commercial_pub_count * 0.9)
-    risk_manageability = clamp(8.5 - competitor_count * 0.55 + partner_count * 0.18 - max(0, 5 - len(raw_patents)) * 0.5)
-    evidence_confidence = clamp(2.5 + min(len(raw_patents), 60) / 9 + min(len(openalex), 40) / 12 + len(countries) * 0.35)
+    # Dimension scoring: intentionally conservative.
+    technical_fit = clamp(avg_top_relevance * 0.85 + min(high_relevance_count, 8) * 0.25)
+
+    # Market pull must come mainly from CUSTOMER/PARTNER signals and commercial publications,
+    # not from raw publication count alone.
+    market_pull = clamp(1.8 + partner_count * 0.7 + commercial_pub_count * 1.15 + min(len(openalex), 25) * 0.04)
+
+    # Patent strength saturates. Many raw patent hits are useful evidence, but should not dominate.
+    patent_strength = clamp(1.8 + min(len(raw_patents), 80) / 16 + compute_trend_score(stats.get("yearly", [])) * 0.28 + high_relevance_count * 0.18)
+
+    # Geography matters, but wide geography does not equal market pull.
+    family_geo_strength = clamp(1.5 + len(countries) * 0.65 + multi_country_families * 0.9 + min(len(families), 25) * 0.08)
+
+    partner_availability = clamp(1.5 + unique_assignees * 0.22 + partner_count * 0.9 + commercial_pub_count * 0.85)
+
+    # Competition is not automatically bad, but too much direct competitor/substitute activity reduces confidence.
+    risk_manageability = clamp(7.2 - competitor_count * 0.42 + partner_count * 0.12 - max(0, 5 - len(raw_patents)) * 0.45)
+
+    # Confidence is evidence coverage, not optimism.
+    evidence_confidence = clamp(2.0 + min(len(raw_patents), 60) / 14 + min(len(openalex), 40) / 18 + len(countries) * 0.25 + len(families) * 0.03)
 
     dimensions = {
         "Technical fit": round(technical_fit, 1),
@@ -897,35 +921,80 @@ def compute_decision_score(filtered_patents, raw_patents, openalex, stats):
     }
 
     weights = {
-        "Technical fit": 0.18,
-        "Market pull": 0.17,
-        "Patent strength": 0.15,
-        "Family / geography": 0.14,
+        "Technical fit": 0.22,
+        "Market pull": 0.20,
+        "Patent strength": 0.14,
+        "Family / geography": 0.12,
         "Partner availability": 0.14,
-        "Risk manageability": 0.12,
-        "Evidence confidence": 0.10,
+        "Risk manageability": 0.10,
+        "Evidence confidence": 0.08,
     }
-    weighted_10 = sum(dimensions[k] * weights[k] for k in dimensions)
-    score_100 = int(round(weighted_10 * 10))
 
-    if score_100 >= 70 and dimensions["Risk manageability"] >= 4.5:
+    weighted_10 = sum(dimensions[k] * weights[k] for k in dimensions)
+    raw_score_100 = int(round(weighted_10 * 10))
+
+    # Gating / caps prevent unrealistic 90+ scores from patent volume alone.
+    score_caps = []
+    gating_reasons = []
+
+    if not filtered_patents:
+        score_caps.append(44)
+        gating_reasons.append("Žádný patent neprošel filtrem relevance")
+    if dimensions["Technical fit"] < 5.0:
+        score_caps.append(54)
+        gating_reasons.append("Nízký technický fit")
+    if dimensions["Market pull"] < 5.0:
+        score_caps.append(66)
+        gating_reasons.append("Market pull zatím není dostatečně doložený")
+    if dimensions["Partner availability"] < 5.0:
+        score_caps.append(72)
+        gating_reasons.append("Nedostatek jasných partner/customer signálů")
+    if dimensions["Evidence confidence"] < 5.0:
+        score_caps.append(68)
+        gating_reasons.append("Nízká datová jistota")
+    if dimensions["Risk manageability"] < 5.0:
+        score_caps.append(64)
+        gating_reasons.append("Vyšší konkurenční nebo substituční riziko")
+
+    # Without explicit commercial evidence, never call it a very strong GO.
+    if commercial_pub_count == 0 and partner_count < 3:
+        score_caps.append(74)
+        gating_reasons.append("Chybí silnější komerční/partnerský důkaz")
+
+    score_100 = min(raw_score_100, min(score_caps) if score_caps else raw_score_100)
+
+    confidence = "High" if dimensions["Evidence confidence"] >= 7.2 else ("Medium" if dimensions["Evidence confidence"] >= 4.8 else "Low")
+
+    # Verdict is also gated, not just score-based.
+    go_allowed = (
+        score_100 >= 75
+        and dimensions["Technical fit"] >= 6.5
+        and dimensions["Market pull"] >= 6.0
+        and dimensions["Partner availability"] >= 5.5
+        and dimensions["Risk manageability"] >= 5.5
+        and confidence != "Low"
+        and (commercial_pub_count > 0 or partner_count >= 3)
+    )
+
+    if go_allowed:
         verdict = "GO"
     elif score_100 >= 45:
         verdict = "CONDITIONAL GO"
     else:
         verdict = "NO-GO"
 
-    confidence = "High" if dimensions["Evidence confidence"] >= 7.2 else ("Medium" if dimensions["Evidence confidence"] >= 4.8 else "Low")
-
     risk_flags = []
-    if dimensions["Market pull"] < 4.5:
-        risk_flags.append("Slabé tržní/partnerské signály")
-    if dimensions["Family / geography"] < 4:
+    if dimensions["Market pull"] < 5.0:
+        risk_flags.append("Slabé nebo zatím nedoložené tržní/partnerské signály")
+    if dimensions["Family / geography"] < 4.5:
         risk_flags.append("Nízké geografické pokrytí patentů")
-    if dimensions["Risk manageability"] < 5:
+    if dimensions["Risk manageability"] < 5.5:
         risk_flags.append("Vyšší konkurenční nebo substituční riziko")
-    if dimensions["Evidence confidence"] < 5:
+    if dimensions["Evidence confidence"] < 5.0:
         risk_flags.append("Nízká datová jistota")
+    for reason in gating_reasons:
+        if reason not in risk_flags:
+            risk_flags.append(reason)
     if not risk_flags:
         risk_flags.append("Bez zásadní červené vlajky v dostupných datech")
 
@@ -933,7 +1002,8 @@ def compute_decision_score(filtered_patents, raw_patents, openalex, stats):
         f"{len(raw_patents)} nalezených patentových záznamů, {len(filtered_patents)} po AI filtraci relevance",
         f"{len(families)} odhadovaných patentových rodin, {len(countries)} států/úřadů",
         f"{commercial_pub_count} publikací s komerční afiliací podle OpenAlex heuristiky",
-        f"{unique_assignees} unikátních přihlašovatelů ve filtrovaném setu",
+        f"{unique_assignees} unikátních přihlašovatelů ve filtrovaném/analytickém setu",
+        f"Raw skóre před konzervativními limity: {raw_score_100}/100; finální skóre po gatech: {score_100}/100",
     ]
 
     next_steps = []
@@ -950,6 +1020,7 @@ def compute_decision_score(filtered_patents, raw_patents, openalex, stats):
 
     return {
         "score_100": score_100,
+        "raw_score_100": raw_score_100,
         "verdict": verdict,
         "confidence": confidence,
         "dimensions": dimensions,
@@ -957,6 +1028,8 @@ def compute_decision_score(filtered_patents, raw_patents, openalex, stats):
         "evidence": evidence,
         "next_steps": next_steps,
         "weights": weights,
+        "gating_reasons": gating_reasons,
+        "model_version": SCORE_MODEL_VERSION,
     }
 
 
@@ -965,7 +1038,8 @@ def scorecard_to_text(scorecard):
         return "Scorecard není k dispozici."
     lines = [
         f"Celkové skóre: {scorecard.get('score_100', '—')}/100",
-        f"Verdikt: {scorecard.get('verdict', '—')}",
+        f"Verdikt scorecardu: {scorecard.get('verdict', '—')}",
+        f"Závazný verdikt pro finální report: {scorecard.get('verdict', '—')}",
         f"Míra jistoty: {scorecard.get('confidence', '—')}",
         "Dílčí skóre:",
     ]
@@ -1195,6 +1269,18 @@ def search_openalex(keywords, max_results=30):
 def run_analysis(api_key, tech_summary, patents, openalex, pdf_text, stats, scorecard, prompt_set="default"):
     system, user_template = get_prompt(prompt_set, "final_analysis")
 
+    forced_verdict = scorecard.get("verdict", "CONDITIONAL GO") if scorecard else "CONDITIONAL GO"
+    consistency_guard = f"""
+
+CRITICAL CONSISTENCY RULE:
+The application scorecard is the single source of truth for the headline decision.
+The final report verdict MUST be exactly: {forced_verdict}.
+Do not change the verdict to GO, CONDITIONAL GO, or NO-GO independently.
+You may add nuance, caveats and conditions, but section 6 must use exactly this verdict: {forced_verdict}.
+"""
+    system = system + consistency_guard
+    user_template = user_template + "\n\nZÁVAZNÝ VERDIKT PRO SEKCI 6: {{forced_verdict}}"
+
     assignee_table = "\n".join(f"  {name}: {count} patentů" for name, count in stats.get("assignees", [])[:10]) or "Žádná data."
     yearly_str = "\n".join(f"  {y}: {c} patentů" for y, c in stats.get("yearly", []) if c > 0) or "Žádná data."
     pat_sum = "\n".join(
@@ -1225,6 +1311,7 @@ def run_analysis(api_key, tech_summary, patents, openalex, pdf_text, stats, scor
         family_table=family_sum,
         country_table=country_sum,
         source_document=pdf_text[:2200],
+        forced_verdict=forced_verdict,
     )
     return call_gemini(api_key, prompt, system)
 
@@ -1480,7 +1567,7 @@ def generate_docx(tech_summary, queries, patents_raw_count, patents, openalex, a
 
     doc.add_page_break()
     doc.add_heading("Metodologie a nastavení", level=1)
-    doc.add_paragraph("Systém: AI Transfer System V6.1")
+    doc.add_paragraph("Systém: AI Transfer System V6.3")
     doc.add_paragraph(f"Datum: {datetime.now().strftime('%d. %m. %Y %H:%M')}")
     doc.add_paragraph(f"Zdrojový dokument: {pdf_filename}")
     doc.add_paragraph(f"Prompt sada: {prompt_set}")
@@ -1719,7 +1806,7 @@ if st.session_state.patents_raw:
     st.markdown("### 🧭 Decision dashboard")
     analysis_patents = st.session_state.patents_filtered or st.session_state.patents_raw[:20]
     stats = compute_stats(analysis_patents)
-    if not st.session_state.scorecard:
+    if (not st.session_state.scorecard) or st.session_state.scorecard.get("model_version") != SCORE_MODEL_VERSION:
         st.session_state.scorecard = compute_decision_score(st.session_state.patents_filtered, st.session_state.patents_raw, st.session_state.openalex_results, stats)
     render_score_dashboard(st.session_state.scorecard)
 
@@ -1810,7 +1897,7 @@ if st.session_state.phase >= 4 and st.session_state.patents_raw and not st.sessi
                 if not st.session_state.patents_filtered:
                     st.warning("Žádný patent neprošel filtrem relevance. Pro analýzu použiju top raw výsledky jako slabší evidenci.")
                 stats = compute_stats(analysis_patents)
-                scorecard = st.session_state.scorecard or compute_decision_score(st.session_state.patents_filtered, st.session_state.patents_raw, st.session_state.openalex_results, stats)
+                scorecard = st.session_state.scorecard if st.session_state.scorecard.get("model_version") == SCORE_MODEL_VERSION else compute_decision_score(st.session_state.patents_filtered, st.session_state.patents_raw, st.session_state.openalex_results, stats)
                 analysis = run_analysis(gemini_key, st.session_state.tech_summary, analysis_patents, st.session_state.openalex_results, st.session_state.pdf_text, stats, scorecard, prompt_set=prompt_set)
                 st.session_state.analysis = analysis
                 st.session_state.phase = 5
@@ -1843,7 +1930,7 @@ if st.session_state.phase >= 5 and st.session_state.analysis:
     col1, col2, col3 = st.columns(3)
     export_patents = st.session_state.patents_filtered or st.session_state.patents_raw
     export_stats = compute_stats(export_patents)
-    export_scorecard = st.session_state.scorecard or compute_decision_score(st.session_state.patents_filtered, st.session_state.patents_raw, st.session_state.openalex_results, export_stats)
+    export_scorecard = st.session_state.scorecard if st.session_state.scorecard.get("model_version") == SCORE_MODEL_VERSION else compute_decision_score(st.session_state.patents_filtered, st.session_state.patents_raw, st.session_state.openalex_results, export_stats)
     with col1:
         if st.button("📄 Word report", type="primary"):
             with st.spinner("Generuji .docx..."):
