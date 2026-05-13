@@ -661,11 +661,60 @@ def extract_pdf_text(f):
     return "\n".join(pages)
 
 
+def find_patent_publication_number(value):
+    """Najde skutečné publikační číslo patentu i uvnitř URL typu /patent/US2020123456A1.
+    Důležité: nebere první dvě písmena ze slova `patents`, takže už nevznikne falešné PA.
+    """
+    if not value or value == "—":
+        return ""
+
+    text = str(value).upper()
+    codes = sorted(PATENT_JURISDICTIONS.keys(), key=len, reverse=True)
+    code_pattern = "|".join(re.escape(c) for c in codes)
+
+    # Typické formáty: US20210001234A1, EP3456789B1, WO2020123456A1, CN109876543A, /patent/US...
+    pattern = re.compile(
+        rf"(?<![A-Z0-9])({code_pattern})[\s\-_/\.]*([0-9]{{5,}})[\s\-_/\.]*([A-Z][0-9]?)?(?![A-Z0-9])",
+        re.IGNORECASE,
+    )
+
+    m = pattern.search(text)
+    if not m:
+        return ""
+
+    jurisdiction, number, kind = m.groups()
+    return f"{jurisdiction.upper()}{number}{(kind or '').upper()}"
+
+
+def extract_publication_number_from_result(result):
+    """Vybere nejlepší publikační číslo z výsledku SerpApi.
+    SerpApi někdy vrací patent_id jako URL/path, takže musíme hledat i v patent_link/link/pdf.
+    """
+    fields = [
+        "publication_number",
+        "patent_number",
+        "patent_id",
+        "publication",
+        "patent_link",
+        "link",
+        "pdf",
+        "title",
+        "snippet",
+    ]
+
+    for field in fields:
+        candidate = find_patent_publication_number(result.get(field, ""))
+        if candidate:
+            return candidate
+
+    return "—"
+
+
 def extract_country(patent_id):
-    if not patent_id or patent_id == "—":
+    pub = find_patent_publication_number(patent_id)
+    if not pub:
         return "—"
-    clean = re.sub(r"[^A-Za-z0-9]", "", str(patent_id)).upper()
-    m = re.match(r"^([A-Z]{2})", clean)
+    m = re.match(r"^([A-Z]{2})", pub)
     return m.group(1) if m else "—"
 
 
@@ -678,15 +727,30 @@ def get_jurisdiction_name(code):
 def parse_patent_code(patent_id):
     if not patent_id or patent_id == "—":
         return {"jurisdiction": "—", "jurisdiction_name": "—", "numeric_part": "—", "kind_code": "—", "normalized_pub": "—"}
-    clean = re.sub(r"[^A-Za-z0-9]", "", str(patent_id)).upper()
-    m = re.match(r"^([A-Z]{2})([0-9]+)([A-Z][0-9]?)?$", clean)
+
+    pub = find_patent_publication_number(patent_id)
+    if not pub:
+        return {"jurisdiction": "—", "jurisdiction_name": "—", "numeric_part": "—", "kind_code": "—", "normalized_pub": str(patent_id)}
+
+    codes = sorted(PATENT_JURISDICTIONS.keys(), key=len, reverse=True)
+    code_pattern = "|".join(re.escape(c) for c in codes)
+    m = re.match(rf"^({code_pattern})([0-9]{{5,}})([A-Z][0-9]?)?$", pub, re.IGNORECASE)
+
     if not m:
-        jurisdiction = extract_country(clean)
-        return {"jurisdiction": jurisdiction, "jurisdiction_name": get_jurisdiction_name(jurisdiction), "numeric_part": "—", "kind_code": "—", "normalized_pub": clean}
+        return {"jurisdiction": "—", "jurisdiction_name": "—", "numeric_part": "—", "kind_code": "—", "normalized_pub": pub}
+
     jurisdiction, numeric_part, kind_code = m.groups()
-    kind_code = kind_code or "—"
+    jurisdiction = jurisdiction.upper()
+    kind_code = (kind_code or "—").upper()
     suffix = "" if kind_code == "—" else kind_code
-    return {"jurisdiction": jurisdiction, "jurisdiction_name": get_jurisdiction_name(jurisdiction), "numeric_part": numeric_part, "kind_code": kind_code, "normalized_pub": f"{jurisdiction}{numeric_part}{suffix}"}
+
+    return {
+        "jurisdiction": jurisdiction,
+        "jurisdiction_name": get_jurisdiction_name(jurisdiction),
+        "numeric_part": numeric_part,
+        "kind_code": kind_code,
+        "normalized_pub": f"{jurisdiction}{numeric_part}{suffix}",
+    }
 
 
 def normalize_text_key(value, max_len=80):
@@ -705,7 +769,6 @@ def estimate_family_key(patent):
         return title_key
     code = parse_patent_code(patent.get("pub_number", ""))
     return f"{code['jurisdiction']}|{code['numeric_part']}"
-
 
 def extract_year(date_str):
     if not date_str or date_str == "—":
@@ -1019,7 +1082,8 @@ def search_google_patents(api_key, query, max_results=25):
                 break
             if r.get("is_scholar"):
                 continue
-            pid = r.get("patent_id", "—") or "—"
+            raw_patent_id = r.get("patent_id", "—") or "—"
+            pid = extract_publication_number_from_result(r)
             parsed = parse_patent_code(pid)
             pat = {
                 "title": r.get("title", "—") or "—",
@@ -1027,6 +1091,7 @@ def search_google_patents(api_key, query, max_results=25):
                 "applicant": r.get("assignee", "—") or "—",
                 "inventor": r.get("inventor", "—") or "—",
                 "pub_number": pid,
+                "raw_patent_id": raw_patent_id,
                 "filing_date": r.get("filing_date", "—") or "—",
                 "grant_date": r.get("grant_date", "—") or "—",
                 "country": parsed["jurisdiction"],
