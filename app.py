@@ -235,17 +235,20 @@ QUERY5: [material query]"""
 # ---------------------------------------------------------------------------
 def sanitize_patent_query(query):
     """Clean up a query string so Google Patents / SerpApi can process it."""
-    # Remove markdown artifacts
-    q = query.strip().strip("`").strip("'")
-    q = re.sub(r'^```.*\n?', '', q)
-    q = re.sub(r'\n?```$', '', q)
+    q = query.strip()
+    # Remove markdown code block wrappers only
+    q = re.sub(r'^```[a-z]*\s*', '', q)
+    q = re.sub(r'\s*```$', '', q)
+    # Remove wrapping backticks only (not internal quotes)
+    if q.startswith('`') and q.endswith('`'):
+        q = q[1:-1]
     # Remove field-specific prefixes that SerpApi doesn't support
     q = re.sub(r'\b(title|abstract|claim|applicant|inventor|classification):', '', q, flags=re.IGNORECASE)
-    # Remove stray backslashes and special chars
+    # Remove stray backslashes and brackets
     q = q.replace('\\', '').replace('{', '').replace('}', '').replace('[', '').replace(']', '')
     # Normalize whitespace
     q = re.sub(r'\s+', ' ', q).strip()
-    # Wrap in parentheses if not already (Google Patents prefers this)
+    # Wrap in parentheses if not already
     if q and not q.startswith('('):
         q = f"({q})"
     return q
