@@ -1,7 +1,7 @@
 """
-AI Transfer System V6.5 — FZÚ Patent & Research Intelligence
+AI Transfer System V6.6 — FZÚ Patent & Research Intelligence
 =============================================================
-Game-changer edition, query intelligence fix:
+Game-changer edition, SerpApi credit saver:
 - Prompt sets from prompt_sets/*.toml
 - Clean FZÚ-inspired UX/UI
 - Patent jurisdictions + estimated patent families
@@ -9,6 +9,7 @@ Game-changer edition, query intelligence fix:
 - Evidence-based GO / CONDITIONAL GO / NO-GO
 - Manual text input + PDF input
 - Cached Google Patents and OpenAlex calls
+- SerpApi credit budget, early stopping and fallback control
 - DOCX/XLSX exports with scorecard, patent families and next steps
 
 Pipeline: PDF/Text → Gemini → Query Builder → Google Patents → AI filtr → OpenAlex → Families → Scorecard → Analysis → Docs + Excel
@@ -47,7 +48,7 @@ st.set_page_config(
 HISTORY_DIR = Path("analysis_history")
 HISTORY_DIR.mkdir(exist_ok=True)
 PROMPT_ROOT = Path("prompt_sets")
-SCORE_MODEL_VERSION = "v6.3-conservative-consistent"
+SCORE_MODEL_VERSION = "v6.6-credit-saver"
 
 
 # ---------------------------------------------------------------------------
@@ -583,19 +584,40 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### 📊 Parametry")
-    max_patents_per_query = st.slider("Patentů na dotaz", 10, 50, 25)
+    max_patents_per_query = st.slider(
+        "Patentů na jeden SerpApi request",
+        10,
+        100,
+        50,
+        help="SerpApi Google Patents umí až 100 výsledků na stránku. Vyšší číslo obvykle neznamená víc kreditů, pokud se nepaginuje.",
+    )
+    target_unique_patents = st.slider(
+        "Cíl: unikátních patentů",
+        10,
+        150,
+        45,
+        help="Jakmile aplikace najde tento počet unikátních patentů, rešerši zastaví a nebude pálit další SerpApi requesty.",
+    )
+    max_serpapi_requests = st.slider(
+        "Limit SerpApi requestů na jednu rešerši",
+        1,
+        30,
+        6,
+        help="Tvrdý strop. Jeden dotaz nebo jedna fallback varianta = zhruba jeden SerpApi request, pokud není výsledek z cache.",
+    )
     max_openalex = st.slider("Max článků z OpenAlex", 5, 50, 30)
     relevance_threshold = st.slider("Min. relevance (0-10)", 0, 10, 5)
     patent_query_mode = st.selectbox(
         "Režim patentové rešerše",
-        ["balanced", "broad", "strict"],
+        ["credit_saver", "balanced", "broad", "strict"],
         index=0,
         format_func=lambda x: {
-            "balanced": "Balanced — doporučeno",
-            "broad": "Broad — když to nachází málo",
+            "credit_saver": "Credit saver — doporučeno",
+            "balanced": "Balanced — více pokrytí",
+            "broad": "Broad — dražší, když to nachází málo",
             "strict": "Strict — jen AI dotazy",
         }[x],
-        help="Balanced automaticky rozšíří AI dotazy o broad Google Patents dotazy. Broad je agresivnější a hodí se, když Google Patents vrací podezřele málo výsledků.",
+        help="Credit saver používá málo silných dotazů, vypíná agresivní fallbacky a zastaví se po dosažení cíle. Broad může spotřebovat výrazně víc kreditů.",
     )
 
     st.divider()
@@ -610,7 +632,7 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.caption("AI Transfer System V6.5\nFZÚ AV ČR")
+    st.caption("AI Transfer System V6.6\nFZÚ AV ČR")
 
 
 # ---------------------------------------------------------------------------
@@ -1400,9 +1422,9 @@ def build_patent_query_plan(ai_queries, keywords, domains, summary, value_propos
 
     # Strict mode still sanitizes AI queries; raw AI syntax is the common failure mode.
     if mode == "strict":
-        for i, q in enumerate(ai_queries, 1):
+        for i, q in enumerate(ai_queries[:5], 1):
             add(f"AI sanitized {i}", sanitize_ai_query_to_google_patents(q), "ai-sanitized")
-        return plan
+        return plan[:5]
 
     keyword_terms = split_prompt_terms(keywords, max_terms=12)
     domain_terms = split_prompt_terms(domains, max_terms=10)
@@ -1414,26 +1436,31 @@ def build_patent_query_plan(ai_queries, keywords, domains, summary, value_propos
     core_terms = dedupe_keep_order(keyword_terms + extracted_from_ai + extracted_from_summary)[:12]
 
     # 1) Use AI queries, but sanitized into Google Patents field boxes.
-    for i, q in enumerate(ai_queries, 1):
+    # Credit saver deliberately avoids adding natural fallbacks here; fallback variants are handled later under request budget.
+    ai_limit = 3 if mode == "credit_saver" else 5
+    for i, q in enumerate(ai_queries[:ai_limit], 1):
         sanitized = sanitize_ai_query_to_google_patents(q)
         add(f"AI sanitized {i}", sanitized, "ai-sanitized")
-        # Also add a natural-language fallback, because Google Patents full-text search can be more forgiving.
-        groups = split_boolean_query(q)
-        if groups:
-            add(f"AI natural fallback {i}", make_free_text_query(groups[:3]), "ai-free-text")
+        if mode != "credit_saver":
+            groups = split_boolean_query(q)
+            if groups:
+                add(f"AI natural fallback {i}", make_free_text_query(groups[:3]), "ai-free-text")
 
     # 2) Core technology query: title/abstract/claims.
     if core_terms:
         add("Core TAC OR", make_field_query("TAC", core_terms, exact=False, max_terms=7), "auto-core")
-        add("Core free text", make_free_text_query([core_terms[:7]]), "auto-core")
-        add("Core abstract", make_field_query("AB", core_terms, exact=False, max_terms=6), "auto-core")
+        if mode != "credit_saver":
+            add("Core free text", make_free_text_query([core_terms[:7]]), "auto-core")
+            add("Core abstract", make_field_query("AB", core_terms, exact=False, max_terms=6), "auto-core")
 
     # 3) Application/domain queries: core AND domain as separate TAC boxes.
-    for domain in domain_terms[:5]:
+    domain_limit = 2 if mode == "credit_saver" else 5
+    for domain in domain_terms[:domain_limit]:
         q = make_domain_query(core_terms[:6], domain)
         if q:
             add(f"Domain TAC: {domain}", q, "auto-domain")
-            add(f"Domain free: {domain}", make_free_text_query([core_terms[:5], [domain]]), "auto-domain")
+            if mode != "credit_saver":
+                add(f"Domain free: {domain}", make_free_text_query([core_terms[:5], [domain]]), "auto-domain")
 
     # 4) Broad mode adds relaxed single concept and domain-only queries.
     if mode == "broad":
@@ -1442,6 +1469,8 @@ def build_patent_query_plan(ai_queries, keywords, domains, summary, value_propos
         for d in domain_terms[:6]:
             add(f"Domain only TAC: {d}", make_field_query("TAC", [d], exact=False, max_terms=1), "auto-domain")
 
+    if mode == "credit_saver":
+        return plan[:6]
     return plan[:22 if mode == "broad" else 14]
 
 
@@ -1470,28 +1499,54 @@ def build_fallback_queries(query):
 
     return [v for v in dedupe_keep_order(variants) if v]
 
-def search_google_patents_resilient(api_key, query, max_results=25, min_results_before_fallback=6, enable_fallback=True):
-    """Search one query, then relax it if it returns suspiciously few patents."""
+def search_google_patents_resilient(
+    api_key,
+    query,
+    max_results=50,
+    min_results_before_fallback=1,
+    enable_fallback=True,
+    remaining_request_budget=1,
+    max_fallback_variants=0,
+):
+    """
+    Search one query under a hard SerpApi request budget.
+    One primary query or fallback variant can cost one SerpApi request unless served from SerpApi cache.
+    """
     combined, seen = [], set()
     audit = []
+    requests_used = 0
+
     variants = build_fallback_queries(query) if enable_fallback else [query]
+    # Always include the primary query. Add only a small number of fallback variants.
+    variants = variants[: max(1, 1 + max_fallback_variants)]
 
     for idx, variant in enumerate(variants):
+        if requests_used >= remaining_request_budget:
+            audit.append({"variant": idx + 1, "query": variant, "results": 0, "status": "skipped: request budget reached"})
+            break
+
         try:
+            requests_used += 1
             results = search_google_patents(api_key, variant, max_results=max_results)
             audit.append({"variant": idx + 1, "query": variant, "results": len(results), "status": "ok"})
-            for p in results:
-                key = p.get("pub_number") or p.get("gp_link") or p.get("title")
+
+            for pat in results:
+                key = pat.get("pub_number") or pat.get("gp_link") or pat.get("title")
                 if key and key not in seen:
                     seen.add(key)
-                    combined.append(p)
+                    combined.append(pat)
+
             if len(combined) >= max_results:
                 break
+
+            # Fallback only if primary query is almost empty.
             if idx == 0 and len(results) >= min_results_before_fallback:
                 break
+
         except Exception as e:
             audit.append({"variant": idx + 1, "query": variant, "results": 0, "status": f"error: {e}"})
-    return combined[:max_results], audit
+
+    return combined[:max_results], audit, requests_used
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -1922,7 +1977,7 @@ def generate_docx(tech_summary, queries, patents_raw_count, patents, openalex, a
 
     doc.add_page_break()
     doc.add_heading("Metodologie a nastavení", level=1)
-    doc.add_paragraph("Systém: AI Transfer System V6.5")
+    doc.add_paragraph("Systém: AI Transfer System V6.6")
     doc.add_paragraph(f"Datum: {datetime.now().strftime('%d. %m. %Y %H:%M')}")
     doc.add_paragraph(f"Zdrojový dokument: {pdf_filename}")
     doc.add_paragraph(f"Prompt sada: {prompt_set}")
@@ -2120,10 +2175,21 @@ if st.session_state.search_queries:
         st.session_state.value_proposition,
         mode=patent_query_mode,
     )
-    st.caption(f"Režim: **{patent_query_mode}** · počet dotazů ve vyhledávacím plánu: **{len(query_plan_preview)}**")
+    planned_to_run = query_plan_preview[:max_serpapi_requests]
+    st.caption(
+        f"Režim: **{patent_query_mode}** · plán vytvořil **{len(query_plan_preview)}** dotazů · "
+        f"spustí se max **{len(planned_to_run)}** dotazů podle limitu SerpApi requestů"
+    )
+    if patent_query_mode == "credit_saver":
+        st.info("Credit saver: aplikace spustí jen nejsilnější dotazy, nepoužije agresivní fallbacky a zastaví se po dosažení cíle unikátních patentů.")
+    else:
+        st.warning("Pozor: Balanced/Broad může spotřebovat víc SerpApi kreditů kvůli více dotazům a fallback variantám. Pro běžný screening používej Credit saver.")
+
     with st.expander("Náhled skutečných Google Patents dotazů", expanded=True):
-        for i, item in enumerate(query_plan_preview, 1):
+        for i, item in enumerate(planned_to_run, 1):
             st.code(f"{i}. [{item['origin']}] {item['label']}\n{item['query']}", language="text")
+        if len(query_plan_preview) > len(planned_to_run):
+            st.caption(f"Dalších {len(query_plan_preview) - len(planned_to_run)} dotazů se nespustí kvůli limitu requestů.")
 
 # Search + filter
 if st.session_state.phase >= 2 and st.session_state.search_queries and not st.session_state.patents_raw:
@@ -2146,36 +2212,70 @@ if st.session_state.phase >= 2 and st.session_state.search_queries and not st.se
             st.stop()
 
         progress = st.progress(0, text="Rešerše...")
-        fallback_enabled = patent_query_mode != "strict"
-        for qi, item in enumerate(query_plan):
+        requests_used_total = 0
+        fallback_enabled = patent_query_mode in ("balanced", "broad")
+        max_fallback_variants = {"credit_saver": 0, "strict": 0, "balanced": 1, "broad": 2}.get(patent_query_mode, 0)
+        min_results_before_fallback = {"credit_saver": 1, "strict": 1, "balanced": 1, "broad": 3}.get(patent_query_mode, 1)
+
+        # Hard cap: do not even try more plan items than the configured request budget.
+        runnable_query_plan = query_plan[:max_serpapi_requests]
+
+        for qi, item in enumerate(runnable_query_plan):
+            if requests_used_total >= max_serpapi_requests:
+                st.toast("Limit SerpApi requestů dosažen — zastavuji rešerši.")
+                break
+            if len(all_patents) >= target_unique_patents:
+                st.toast(f"Cíl {target_unique_patents} unikátních patentů dosažen — zastavuji rešerši.")
+                break
+
             q = item["query"]
-            progress.progress(int((qi / len(query_plan)) * 35), text=f"Dotaz {qi + 1}/{len(query_plan)}: {q[:48]}...")
+            remaining_budget = max_serpapi_requests - requests_used_total
+            progress.progress(
+                int((qi / max(len(runnable_query_plan), 1)) * 35),
+                text=f"Dotaz {qi + 1}/{len(runnable_query_plan)} · requesty {requests_used_total}/{max_serpapi_requests}: {q[:48]}...",
+            )
             try:
-                results, audit = search_google_patents_resilient(
+                results, audit, requests_used = search_google_patents_resilient(
                     serpapi_key,
                     q,
                     max_results=max_patents_per_query,
-                    min_results_before_fallback=8 if patent_query_mode == "broad" else 5,
+                    min_results_before_fallback=min_results_before_fallback,
                     enable_fallback=fallback_enabled,
+                    remaining_request_budget=remaining_budget,
+                    max_fallback_variants=max_fallback_variants,
                 )
+                requests_used_total += requests_used
                 query_total = len(results)
-                st.toast(f"Dotaz {qi + 1}: nalezeno {query_total} patentů")
+                st.toast(f"Dotaz {qi + 1}: {query_total} patentů · requesty celkem {requests_used_total}/{max_serpapi_requests}")
                 for row in audit:
                     row["plan_label"] = item["label"]
                     row["origin"] = item["origin"]
+                    row["requests_used_total"] = requests_used_total
                     query_audit.append(row)
 
-                for p in results:
-                    unique_key = p.get("pub_number") or p.get("gp_link") or p.get("title")
+                for pat in results:
+                    unique_key = pat.get("pub_number") or pat.get("gp_link") or pat.get("title")
                     if unique_key and unique_key not in seen:
                         seen.add(unique_key)
-                        p["source_query"] = q
-                        p["source_query_label"] = item["label"]
-                        all_patents.append(p)
+                        pat["source_query"] = q
+                        pat["source_query_label"] = item["label"]
+                        all_patents.append(pat)
+                        if len(all_patents) >= target_unique_patents:
+                            break
             except Exception as e:
-                query_audit.append({"plan_label": item["label"], "origin": item["origin"], "variant": 1, "query": q, "results": 0, "status": f"error: {e}"})
+                query_audit.append({"plan_label": item["label"], "origin": item["origin"], "variant": 1, "query": q, "results": 0, "status": f"error: {e}", "requests_used_total": requests_used_total})
                 st.error(f"Dotaz {qi + 1} selhal: {e}")
-            time.sleep(0.2)
+            time.sleep(0.15)
+
+        query_audit.append({
+            "plan_label": "SUMMARY",
+            "origin": "system",
+            "variant": "—",
+            "query": f"Limit {max_serpapi_requests}, použito {requests_used_total}, unikátních patentů {len(all_patents)}",
+            "results": len(all_patents),
+            "status": "summary",
+            "requests_used_total": requests_used_total,
+        })
         st.session_state.query_audit = query_audit
         st.session_state.patents_raw = all_patents
         if not all_patents:
