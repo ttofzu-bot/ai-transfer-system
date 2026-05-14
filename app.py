@@ -16,6 +16,7 @@ import random
 from datetime import datetime
 from pathlib import Path
 from collections import Counter
+import pandas as pd
 
 st.set_page_config(page_title="AI Transfer System — FZÚ", page_icon="🔬", layout="wide", initial_sidebar_state="expanded")
 HISTORY_DIR = Path("analysis_history")
@@ -135,9 +136,13 @@ def call_gemini(api_key, prompt, system_instruction="", max_retries=5):
 # HELPERS
 # ---------------------------------------------------------------------------
 def extract_pdf_text(f):
-    import PyPDF2
-    reader = PyPDF2.PdfReader(f)
-    return "\n".join(p.extract_text() for p in reader.pages if p.extract_text())
+    try:
+        import PyPDF2
+        reader = PyPDF2.PdfReader(f)
+        return "\n".join(p.extract_text() for p in reader.pages if p.extract_text())
+    except Exception as e:
+        st.error(f"Chyba při čtení PDF: {e}")
+        return ""
 
 def extract_country(patent_id):
     """Extract filing country from patent ID like US20210001234A1 → US"""
@@ -288,8 +293,10 @@ BE STRICT. Only NUMBER|SCORE|TYPE|REASON lines."""
                     try:
                         idx = int(parts[0].strip().rstrip("."))
                         scores[idx] = (min(int(parts[1].strip()), 10), parts[2].strip(), parts[3].strip() if len(parts)>3 else "—")
-                    except: pass
-        except: pass
+                    except (ValueError, IndexError):
+                        continue
+        except Exception as e:
+            st.toast(f"⚠️ Filtr batch {start//BATCH + 1} selhal: {str(e)[:50]}")
         time.sleep(0.5)
 
     filtered = []
@@ -773,7 +780,6 @@ if st.session_state.patents_raw:
     with tab4:
         st.markdown("#### Top přihlašovatelé patentů")
         if stats["assignees"]:
-            import pandas as pd
             df_a = pd.DataFrame(stats["assignees"], columns=["Firma/Instituce", "Počet patentů"])
             st.dataframe(df_a, use_container_width=True, hide_index=True)
         st.markdown("#### Patentová aktivita po letech")
