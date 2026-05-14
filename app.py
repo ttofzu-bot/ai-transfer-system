@@ -233,14 +233,39 @@ QUERY5: [material query]"""
 # ---------------------------------------------------------------------------
 # STEP 2: SEARCH GOOGLE PATENTS
 # ---------------------------------------------------------------------------
+def sanitize_patent_query(query):
+    """Clean up a query string so Google Patents / SerpApi can process it."""
+    # Remove markdown artifacts
+    q = query.strip().strip("`").strip("'")
+    q = re.sub(r'^```.*\n?', '', q)
+    q = re.sub(r'\n?```$', '', q)
+    # Remove field-specific prefixes that SerpApi doesn't support
+    q = re.sub(r'\b(title|abstract|claim|applicant|inventor|classification):', '', q, flags=re.IGNORECASE)
+    # Remove stray backslashes and special chars
+    q = q.replace('\\', '').replace('{', '').replace('}', '').replace('[', '').replace(']', '')
+    # Normalize whitespace
+    q = re.sub(r'\s+', ' ', q).strip()
+    # Wrap in parentheses if not already (Google Patents prefers this)
+    if q and not q.startswith('('):
+        q = f"({q})"
+    return q
+
 def search_google_patents(api_key, query, max_results=25):
+    query = sanitize_patent_query(query)
     patents, page_num = [], 1
     while len(patents) < max_results:
-        resp = requests.get("https://serpapi.com/search.json",
-            params={"engine": "google_patents", "q": query, "api_key": api_key, "num": 100, "page": page_num}, timeout=30)
-        if resp.status_code != 200: raise Exception(f"SerpApi {resp.status_code}")
+        params = {"engine": "google_patents", "q": query, "api_key": api_key, "num": 100, "page": page_num}
+        resp = requests.get("https://serpapi.com/search.json", params=params, timeout=30)
+        if resp.status_code != 200:
+            raise Exception(f"SerpApi {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
-        for r in data.get("organic_results", []):
+        # Check for API error
+        if "error" in data:
+            raise Exception(f"SerpApi error: {data['error']}")
+        results = data.get("organic_results", [])
+        if not results:
+            break
+        for r in results:
             if len(patents) >= max_results: break
             if r.get("is_scholar"): continue
             pid = r.get("patent_id", "—") or "—"
@@ -713,14 +738,15 @@ if st.session_state.phase >= 2 and st.session_state.search_queries and not st.se
         all_patents, seen = [], set()
         progress = st.progress(0, text="Rešerše...")
         for qi, q in enumerate(st.session_state.search_queries):
-            progress.progress(int((qi/len(st.session_state.search_queries))*35), text=f"Dotaz {qi+1}: {q[:40]}...")
+            sanitized = sanitize_patent_query(q)
+            progress.progress(int((qi/len(st.session_state.search_queries))*35), text=f"Dotaz {qi+1}: {sanitized[:50]}...")
             try:
                 results = search_google_patents(serpapi_key, q, max_patents_per_query)
                 st.toast(f"Dotaz {qi+1}: nalezeno {len(results)} patentů")
                 for p in results:
-                    if p["pub_number"] not in seen: seen.add(p["pub_number"]); p["source_query"] = q; all_patents.append(p)
+                    if p["pub_number"] not in seen: seen.add(p["pub_number"]); p["source_query"] = sanitized; all_patents.append(p)
             except Exception as e:
-                st.error(f"Dotaz {qi+1} selhal: {e}")
+                st.error(f"Dotaz {qi+1} selhal: {e}\nDotaz: {sanitized}")
             time.sleep(0.3)
 
         st.session_state.patents_raw = all_patents
